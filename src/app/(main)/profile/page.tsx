@@ -1,7 +1,6 @@
 'use client';
 import * as React from 'react';
 import { useAuth } from '@/hooks/use-auth';
-import { ProtectedRoute } from '@/components/protected-route';
 import {
   Card,
   CardContent,
@@ -29,11 +28,7 @@ import {
 import { useToast } from '@/hooks/use-toast';
 
 export default function ProfilePage() {
-  return (
-    <ProtectedRoute>
-      <ProfileContent />
-    </ProtectedRoute>
-  );
+  return <ProfileContent />;
 }
 
 function ProfileContent() {

@@ -3,6 +3,77 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Force CSS loading - إجبار تحميل CSS */
+* {
+  box-sizing: border-box;
+}
+
+html {
+  font-family: 'Cairo', ui-sans-serif, system-ui, sans-serif;
+  direction: rtl;
+  text-align: right;
+}
+
+body {
+  margin: 0;
+  padding: 0;
+  min-height: 100vh;
+  font-family: 'Cairo', ui-sans-serif, system-ui, sans-serif;
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Basic component styles - أنماط المكونات الأساسية */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.5rem 1rem;
+  border-radius: 0.375rem;
+  font-weight: 500;
+  font-size: 0.875rem;
+  line-height: 1.25rem;
+  border: 1px solid transparent;
+  cursor: pointer;
+  transition: all 0.2s ease-in-out;
+}
+
+.btn-primary {
+  background-color: #0891b2;
+  color: white;
+}
+
+.btn-primary:hover {
+  background-color: #0e7490;
+}
+
+.card {
+  background-color: white;
+  border-radius: 0.5rem;
+  border: 1px solid #e5e7eb;
+  box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.1);
+  padding: 1.5rem;
+}
+
+.input {
+  display: block;
+  width: 100%;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid #d1d5db;
+  border-radius: 0.375rem;
+  font-size: 0.875rem;
+  line-height: 1.25rem;
+  text-align: right;
+  direction: rtl;
+}
+
+.input:focus {
+  outline: none;
+  border-color: #0891b2;
+  box-shadow: 0 0 0 3px rgba(8, 145, 178, 0.1);
+}
+
 @layer base {
   :root {
     --background: 180 65% 92.5%;
@@ -81,5 +152,129 @@
   }
   body {
     @apply bg-background text-foreground;
+    font-family: 'Cairo', sans-serif;
+  }
+
+  /* RTL improvements */
+  [dir="rtl"] {
+    text-align: right;
+  }
+
+  /* Arabic font improvements */
+  h1, h2, h3, h4, h5, h6 {
+    font-family: 'Cairo', sans-serif;
+    font-weight: 700;
+  }
+
+  /* Better Arabic text rendering */
+  p, span, div, label, input, textarea, button {
+    font-family: 'Cairo', sans-serif;
+    line-height: 1.6;
+  }
+
+  /* Fix for Arabic numbers */
+  .arabic-numbers {
+    font-feature-settings: "tnum";
+  }
+
+  /* Improve button spacing for Arabic text */
+  button {
+    letter-spacing: 0.025em;
+  }
+
+  /* Better form styling for RTL */
+  input, textarea, select {
+    text-align: right;
+  }
+
+  /* Fix for icons in RTL */
+  [dir="rtl"] .lucide {
+    transform: scaleX(-1);
+  }
+
+  [dir="rtl"] .lucide-chevron-left,
+  [dir="rtl"] .lucide-chevron-right,
+  [dir="rtl"] .lucide-arrow-left,
+  [dir="rtl"] .lucide-arrow-right {
+    transform: scaleX(-1);
+  }
+
+  /* Custom RTL utilities */
+  .rtl-flip {
+    transform: scaleX(-1);
+  }
+
+  .rtl-container {
+    direction: rtl;
+    text-align: right;
+  }
+
+  /* Improved table styling for RTL */
+  [dir="rtl"] table {
+    text-align: right;
+  }
+
+  [dir="rtl"] th {
+    text-align: right;
+  }
+
+  [dir="rtl"] td {
+    text-align: right;
+  }
+
+  /* Better dropdown positioning for RTL */
+  [dir="rtl"] [data-radix-popper-content-wrapper] {
+    direction: rtl;
+  }
+
+  /* Fix for toast notifications in RTL */
+  [dir="rtl"] [data-sonner-toaster] {
+    left: auto !important;
+    right: 0 !important;
+  }
+
+  /* Improved form styling */
+  [dir="rtl"] .form-control {
+    text-align: right;
+  }
+
+  /* Better button spacing */
+  [dir="rtl"] button {
+    gap: 0.5rem;
+  }
+
+  /* Improved card layouts */
+  .arabic-card {
+    direction: rtl;
+    text-align: right;
+  }
+
+  /* Loading spinner improvements */
+  .arabic-loading {
+    direction: rtl;
+    justify-content: flex-end;
+  }
+
+  /* Responsive improvements for Arabic text */
+  @media (max-width: 640px) {
+    body {
+      font-size: 14px;
+    }
+
+    h1, h2, h3 {
+      line-height: 1.4;
+    }
+  }
+
+  /* Print styles for Arabic content */
+  @media print {
+    body {
+      direction: rtl;
+      text-align: right;
+    }
+
+    .no-print {
+      display: none !important;
+    }
   }
 }

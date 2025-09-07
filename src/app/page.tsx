@@ -38,6 +38,7 @@ import {
   Briefcase,
   FileText,
   AlertCircle,
+  RefreshCw,
   UserX,
   PlusCircle,
   Heart,
@@ -45,6 +46,7 @@ import {
   Calendar,
   CreditCard,
   Upload,
+  FileX,
 } from 'lucide-react';
 import {
   Dialog,
@@ -60,93 +62,160 @@ import { Label } from '@/components/ui/label';
 import { useToast } from '@/hooks/use-toast';
 import * as React from 'react';
 import { documentApi } from '@/lib/api-client';
+import { useDocumentRefresh, RefreshProvider } from '@/hooks/use-refresh-context';
 
-// Institution Expiry Stats Component
-function InstitutionExpiryStats() {
+
+
+// إحصائيات المستندات والاشتراكات المنتهية - مع مراعاة المستندات غير القابلة للتجديد
+function DocumentExpiryStats() {
   const [stats, setStats] = React.useState<any[]>([]);
   const [summary, setSummary] = React.useState({
     totalInstitutions: 0,
     totalExpiredDocs: 0,
     totalExpiringSoonDocs: 0,
+    totalNonRenewableExpiredDocs: 0,
     totalExpiredSubs: 0,
     totalExpiringSoonSubs: 0
   });
   const [loading, setLoading] = React.useState(true);
+  const [lastUpdated, setLastUpdated] = React.useState<Date | null>(null);
+  const { refreshTrigger } = useDocumentRefresh();
+
+  const fetchExpiryStats = React.useCallback(async () => {
+    try {
+      setLoading(true);
+
+      // جلب جميع المؤسسات
+      const institutionsResponse = await institutionApi.getAll();
+      if (!institutionsResponse.success) return;
+
+      const institutions = institutionsResponse.data || [];
+      const institutionStats = [];
+      let totalExpiredDocs = 0, totalExpiringSoonDocs = 0, totalNonRenewableExpiredDocs = 0;
+      let totalExpiredSubs = 0, totalExpiringSoonSubs = 0;
+
+      for (const institution of institutions) {
+        // جلب جميع المستندات للمؤسسة (تطبيق نفس منطق الاشتراكات)
+        const allDocsResponse = await documentApi.getAll({ entityType: 'institution', entityId: institution.id });
+        const allDocs = allDocsResponse.success ? allDocsResponse.data || [] : [];
+
+        // جلب جميع الاشتراكات للمؤسسة
+        const subscriptionsResponse = await subscriptionApi.getByInstitutionId(institution.id);
+        const subscriptions = subscriptionsResponse.success ? subscriptionsResponse.data || [] : [];
+
+        const today = new Date();
+        const futureDate = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000); // 30 يوم من الآن
+
+        // تطبيق نفس منطق الاشتراكات على المستندات
+        const expiredDocs = allDocs.filter((doc: any) => {
+          if (!doc.expiryDate) return false;
+          const expiryDate = new Date(doc.expiryDate);
+          return expiryDate < today; // منتهي بالفعل
+        });
+
+        const expiringSoonDocs = allDocs.filter((doc: any) => {
+          if (!doc.expiryDate) return false;
+          const expiryDate = new Date(doc.expiryDate);
+          return expiryDate >= today && expiryDate <= futureDate; // ينتهي خلال 30 يوم
+        });
+
+        // تطبيق نفس منطق الاشتراكات على الاشتراكات
+        const expiredSubs = subscriptions.filter((sub: any) => {
+          if (!sub.expiryDate) return false;
+          const expiryDate = new Date(sub.expiryDate);
+          return expiryDate < today; // منتهي بالفعل
+        });
+
+        const expiringSoonSubs = subscriptions.filter((sub: any) => {
+          if (!sub.expiryDate) return false;
+          const expiryDate = new Date(sub.expiryDate);
+          return expiryDate >= today && expiryDate <= futureDate; // ينتهي خلال 30 يوم
+        });
+
+        // تصنيف المستندات المنتهية حسب قابلية التجديد (نفس المنطق)
+        const renewableExpiredDocs = expiredDocs.filter((doc: any) => doc.isRenewable !== false);
+        const nonRenewableExpiredDocs = expiredDocs.filter((doc: any) => doc.isRenewable === false);
+
+        const expiredDocsCount = renewableExpiredDocs.length;
+        const expiringSoonDocsCount = expiringSoonDocs.length;
+        const nonRenewableExpiredDocsCount = nonRenewableExpiredDocs.length;
+        const expiredSubsCount = expiredSubs.length;
+        const expiringSoonSubsCount = expiringSoonSubs.length;
+
+        const totalIssues = expiredDocsCount + expiringSoonDocsCount + nonRenewableExpiredDocsCount + expiredSubsCount + expiringSoonSubsCount;
+
+        // إضافة للإحصائيات الإجمالية
+        totalExpiredDocs += expiredDocsCount;
+        totalExpiringSoonDocs += expiringSoonDocsCount;
+        totalNonRenewableExpiredDocs += nonRenewableExpiredDocsCount;
+        totalExpiredSubs += expiredSubsCount;
+        totalExpiringSoonSubs += expiringSoonSubsCount;
+
+        if (totalIssues > 0) {
+          institutionStats.push({
+            id: institution.id,
+            name: institution.name,
+            renewableExpiredDocs: renewableExpiredDocs,
+            nonRenewableExpiredDocs: nonRenewableExpiredDocs,
+            expiringSoonDocs: expiringSoonDocs,
+            expiredSubs: expiredSubs,
+            expiringSoonSubs: expiringSoonSubs,
+            expiredDocsCount,
+            expiringSoonDocsCount,
+            nonRenewableExpiredDocsCount,
+            expiredSubsCount,
+            expiringSoonSubsCount,
+            totalIssues
+          });
+        }
+      }
+
+      // ترتيب حسب عدد المشاكل (الأكثر أولاً)
+      institutionStats.sort((a, b) => b.totalIssues - a.totalIssues);
+      setStats(institutionStats);
+
+      // حفظ الملخص الإجمالي
+      setSummary({
+        totalInstitutions: institutionStats.length,
+        totalExpiredDocs,
+        totalExpiringSoonDocs,
+        totalNonRenewableExpiredDocs,
+        totalExpiredSubs,
+        totalExpiringSoonSubs
+      });
+      setLastUpdated(new Date());
+    } catch (error) {
+      console.error('Error fetching expiry stats:', error);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
 
   React.useEffect(() => {
-    const fetchExpiryStats = async () => {
-      try {
-        setLoading(true);
+    fetchExpiryStats();
+  }, [fetchExpiryStats, refreshTrigger]);
 
-        // جلب جميع المؤسسات
-        const institutionsResponse = await institutionApi.getAll();
-        if (!institutionsResponse.success) return;
+  // تحديث البيانات كل 5 دقائق
+  React.useEffect(() => {
+    const interval = setInterval(() => {
+      fetchExpiryStats();
+    }, 5 * 60 * 1000); // 5 دقائق
 
-        const institutions = institutionsResponse.data || [];
-        const institutionStats = [];
-        let totalExpiredDocs = 0, totalExpiringSoonDocs = 0, totalExpiredSubs = 0, totalExpiringSoonSubs = 0;
+    return () => clearInterval(interval);
+  }, [fetchExpiryStats]);
 
-        for (const institution of institutions) {
-          // جلب المستندات المنتهية والتي أوشكت على الانتهاء
-          const [expiredDocs, expiringSoonDocs] = await Promise.all([
-            documentApi.getAll({ entityType: 'institution', entityId: institution.id, expired: true }),
-            documentApi.getAll({ entityType: 'institution', entityId: institution.id, expiring: true, days: 30 })
-          ]);
-
-          // جلب الاشتراكات المنتهية والتي أوشكت على الانتهاء
-          const subscriptionsResponse = await subscriptionApi.getByInstitutionId(institution.id);
-          const subscriptions = subscriptionsResponse.success ? subscriptionsResponse.data || [] : [];
-
-          const expiredSubs = subscriptions.filter((sub: any) => sub.status === 'expired');
-          const expiringSoonSubs = subscriptions.filter((sub: any) => sub.status === 'expiring_soon');
-
-          const expiredDocsCount = expiredDocs.data?.length || 0;
-          const expiringSoonDocsCount = expiringSoonDocs.data?.length || 0;
-          const expiredSubsCount = expiredSubs.length;
-          const expiringSoonSubsCount = expiringSoonSubs.length;
-
-          const totalIssues = expiredDocsCount + expiringSoonDocsCount + expiredSubsCount + expiringSoonSubsCount;
-
-          // إضافة للإحصائيات الإجمالية
-          totalExpiredDocs += expiredDocsCount;
-          totalExpiringSoonDocs += expiringSoonDocsCount;
-          totalExpiredSubs += expiredSubsCount;
-          totalExpiringSoonSubs += expiringSoonSubsCount;
-
-          if (totalIssues > 0) {
-            institutionStats.push({
-              id: institution.id,
-              name: institution.name,
-              expiredDocuments: expiredDocsCount,
-              expiringSoonDocuments: expiringSoonDocsCount,
-              expiredSubscriptions: expiredSubsCount,
-              expiringSoonSubscriptions: expiringSoonSubsCount,
-              totalIssues
-            });
-          }
-        }
-
-        // ترتيب حسب عدد المشاكل (الأكثر أولاً)
-        institutionStats.sort((a, b) => b.totalIssues - a.totalIssues);
-        setStats(institutionStats);
-
-        // حفظ الملخص الإجمالي
-        setSummary({
-          totalInstitutions: institutionStats.length,
-          totalExpiredDocs,
-          totalExpiringSoonDocs,
-          totalExpiredSubs,
-          totalExpiringSoonSubs
-        });
-      } catch (error) {
-        console.error('Error fetching expiry stats:', error);
-      } finally {
-        setLoading(false);
-      }
+  // الاستماع للأحداث العالمية للتحديث
+  React.useEffect(() => {
+    const handleGlobalRefresh = () => {
+      fetchExpiryStats();
     };
 
-    fetchExpiryStats();
-  }, []);
+    window.addEventListener('dashboard-refresh', handleGlobalRefresh);
+
+    return () => {
+      window.removeEventListener('dashboard-refresh', handleGlobalRefresh);
+    };
+  }, [fetchExpiryStats]);
 
   if (loading) {
     return (
@@ -166,7 +235,11 @@ function InstitutionExpiryStats() {
     );
   }
 
-  if (stats.length === 0) {
+  const totalIssues = summary.totalExpiredDocs + summary.totalExpiringSoonDocs +
+                     summary.totalNonRenewableExpiredDocs + summary.totalExpiredSubs +
+                     summary.totalExpiringSoonSubs;
+
+  if (totalIssues === 0) {
     return (
       <Card>
         <CardHeader>
@@ -176,8 +249,23 @@ function InstitutionExpiryStats() {
           </CardTitle>
         </CardHeader>
         <CardContent>
-          <div className="text-center py-8 text-green-600">
-            🎉 ممتاز! جميع المستندات والاشتراكات سارية المفعول
+          <div className="text-center py-12">
+            <div className="flex flex-col items-center gap-4">
+              <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center">
+                <Shield className="h-8 w-8 text-green-600" />
+              </div>
+              <div>
+                <h3 className="text-lg font-semibold text-green-800 mb-2">
+                  🎉 ممتاز! جميع المستندات والاشتراكات محدثة
+                </h3>
+                <p className="text-green-600 mb-4">
+                  لا توجد مستندات أو اشتراكات منتهية الصلاحية حالياً
+                </p>
+                <div className="text-sm text-muted-foreground">
+                  آخر فحص: {lastUpdated?.toLocaleString('ar-SA') || 'جاري التحديث...'}
+                </div>
+              </div>
+            </div>
           </div>
         </CardContent>
       </Card>
@@ -187,38 +275,91 @@ function InstitutionExpiryStats() {
   return (
     <Card>
       <CardHeader>
-        <CardTitle className="flex items-center gap-2">
-          <AlertCircle className="h-5 w-5 text-orange-500" />
-          إحصائيات المستندات والاشتراكات المنتهية
-        </CardTitle>
-        <CardDescription>
-          المؤسسات التي تحتاج إلى تجديد مستندات أو اشتراكات
-        </CardDescription>
-      </CardHeader>
-      <CardContent>
-        {/* Summary Cards */}
-        <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-6">
-          <div className="text-center p-3 bg-red-50 rounded-lg border border-red-200">
-            <div className="text-2xl font-bold text-red-600">{summary.totalExpiredDocs}</div>
-            <div className="text-sm text-red-600">مستندات منتهية</div>
+        <div className="flex items-center justify-between">
+          <div>
+            <CardTitle className="flex items-center gap-2">
+              <AlertCircle className="h-5 w-5 text-orange-500" />
+              إحصائيات المستندات والاشتراكات المنتهية
+            </CardTitle>
+            <CardDescription>
+              المؤسسات التي تحتاج إلى تجديد مستندات أو اشتراكات (مع مراعاة المستندات غير القابلة للتجديد)
+            </CardDescription>
           </div>
-          <div className="text-center p-3 bg-orange-50 rounded-lg border border-orange-200">
-            <div className="text-2xl font-bold text-orange-600">{summary.totalExpiringSoonDocs}</div>
-            <div className="text-sm text-orange-600">مستندات تنتهي قريباً</div>
-          </div>
-          <div className="text-center p-3 bg-red-50 rounded-lg border border-red-200">
-            <div className="text-2xl font-bold text-red-600">{summary.totalExpiredSubs}</div>
-            <div className="text-sm text-red-600">اشتراكات منتهية</div>
-          </div>
-          <div className="text-center p-3 bg-orange-50 rounded-lg border border-orange-200">
-            <div className="text-2xl font-bold text-orange-600">{summary.totalExpiringSoonSubs}</div>
-            <div className="text-sm text-orange-600">اشتراكات تنتهي قريباً</div>
-          </div>
-          <div className="text-center p-3 bg-gray-50 rounded-lg border border-gray-200">
-            <div className="text-2xl font-bold text-gray-600">{summary.totalInstitutions}</div>
-            <div className="text-sm text-gray-600">مؤسسات متأثرة</div>
+          <div className="flex items-center gap-2">
+            {lastUpdated && (
+              <span className="text-xs text-muted-foreground">
+                آخر تحديث: {lastUpdated.toLocaleTimeString('ar-SA')}
+              </span>
+            )}
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => fetchExpiryStats()}
+              disabled={loading}
+              className="flex items-center gap-1"
+            >
+              <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
+              تحديث
+            </Button>
           </div>
         </div>
+      </CardHeader>
+      <CardContent>
+        {/* رسالة الحالة */}
+        <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-lg">
+          <div className="flex items-center gap-3">
+            <div className="w-8 h-8 bg-red-100 rounded-full flex items-center justify-center">
+              <AlertCircle className="h-5 w-5 text-red-600" />
+            </div>
+            <div>
+              <h4 className="font-semibold text-red-800">تحتاج إلى انتباه! ⚠️</h4>
+              <p className="text-sm text-red-600">
+                يوجد مستندات أو اشتراكات تحتاج إلى تجديد أو انتهت ولا يمكن تجديدها
+              </p>
+            </div>
+          </div>
+        </div>
+
+        {/* بطاقات الملخص */}
+        <div className="grid grid-cols-2 md:grid-cols-6 gap-4 mb-6">
+          <div className="text-center p-3 bg-red-50 border border-red-200 rounded-lg">
+            <div className="text-2xl font-bold text-red-600">{summary.totalExpiredDocs}</div>
+            <div className="text-sm text-red-600">مستندات منتهية</div>
+            <div className="text-xs text-red-500 mt-1">قابلة للتجديد</div>
+          </div>
+
+          <div className="text-center p-3 bg-orange-50 border border-orange-200 rounded-lg">
+            <div className="text-2xl font-bold text-orange-600">{summary.totalExpiringSoonDocs}</div>
+            <div className="text-sm text-orange-600">مستندات تنتهي قريباً</div>
+            <div className="text-xs text-orange-500 mt-1">خلال 30 يوم</div>
+          </div>
+
+          <div className="text-center p-3 bg-gray-50 border border-gray-400 rounded-lg">
+            <div className="text-2xl font-bold text-gray-700">{summary.totalNonRenewableExpiredDocs}</div>
+            <div className="text-sm text-gray-700">مستندات منتهية</div>
+            <div className="text-xs text-gray-600 mt-1">غير قابلة للتجديد</div>
+          </div>
+
+          <div className="text-center p-3 bg-red-50 border border-red-200 rounded-lg">
+            <div className="text-2xl font-bold text-red-600">{summary.totalExpiredSubs}</div>
+            <div className="text-sm text-red-600">اشتراكات منتهية</div>
+            <div className="text-xs text-red-500 mt-1">تحتاج تجديد</div>
+          </div>
+
+          <div className="text-center p-3 bg-orange-50 border border-orange-200 rounded-lg">
+            <div className="text-2xl font-bold text-orange-600">{summary.totalExpiringSoonSubs}</div>
+            <div className="text-sm text-orange-600">اشتراكات تنتهي قريباً</div>
+            <div className="text-xs text-orange-500 mt-1">خلال 30 يوم</div>
+          </div>
+
+          <div className="text-center p-3 bg-blue-50 border border-blue-200 rounded-lg">
+            <div className="text-2xl font-bold text-blue-600">{summary.totalInstitutions}</div>
+            <div className="text-sm text-blue-600">مؤسسات متأثرة</div>
+            <div className="text-xs text-blue-500 mt-1">تحتاج متابعة</div>
+          </div>
+        </div>
+
+        {/* قائمة المؤسسات */}
         <div className="space-y-4">
           {stats.map((institution, index) => (
             <div key={institution.id} className="p-4 border rounded-lg bg-gradient-to-r from-red-50 to-orange-50 hover:shadow-md transition-shadow">
@@ -234,35 +375,126 @@ function InstitutionExpiryStats() {
                 </Badge>
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
-                {institution.expiredDocuments > 0 && (
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-sm mb-4">
+                {institution.expiredDocsCount > 0 && (
                   <div className="flex items-center gap-2 p-2 bg-red-100 rounded-md text-red-700">
                     <FileText className="h-4 w-4" />
-                    <span className="font-medium">{institution.expiredDocuments} مستند منتهي</span>
+                    <span className="font-medium">{institution.expiredDocsCount} مستند منتهي (قابل للتجديد)</span>
                   </div>
                 )}
 
-                {institution.expiringSoonDocuments > 0 && (
+                {institution.expiringSoonDocsCount > 0 && (
                   <div className="flex items-center gap-2 p-2 bg-orange-100 rounded-md text-orange-700">
                     <FileWarning className="h-4 w-4" />
-                    <span className="font-medium">{institution.expiringSoonDocuments} مستند ينتهي قريباً</span>
+                    <span className="font-medium">{institution.expiringSoonDocsCount} مستند ينتهي قريباً</span>
                   </div>
                 )}
 
-                {institution.expiredSubscriptions > 0 && (
+                {institution.nonRenewableExpiredDocsCount > 0 && (
+                  <div className="flex items-center gap-2 p-2 bg-gray-100 rounded-md text-gray-700">
+                    <FileX className="h-4 w-4" />
+                    <span className="font-medium">{institution.nonRenewableExpiredDocsCount} مستند منتهي (غير قابل للتجديد)</span>
+                  </div>
+                )}
+
+                {institution.expiredSubsCount > 0 && (
                   <div className="flex items-center gap-2 p-2 bg-red-100 rounded-md text-red-700">
                     <CreditCard className="h-4 w-4" />
-                    <span className="font-medium">{institution.expiredSubscriptions} اشتراك منتهي</span>
+                    <span className="font-medium">{institution.expiredSubsCount} اشتراك منتهي</span>
                   </div>
                 )}
 
-                {institution.expiringSoonSubscriptions > 0 && (
+                {institution.expiringSoonSubsCount > 0 && (
                   <div className="flex items-center gap-2 p-2 bg-orange-100 rounded-md text-orange-700">
                     <Calendar className="h-4 w-4" />
-                    <span className="font-medium">{institution.expiringSoonSubscriptions} اشتراك ينتهي قريباً</span>
+                    <span className="font-medium">{institution.expiringSoonSubsCount} اشتراك ينتهي قريباً</span>
                   </div>
                 )}
               </div>
+
+              {/* تفاصيل المستندات القابلة للتجديد */}
+              {institution.renewableExpiredDocs.length > 0 && (
+                <div className="mb-4 pt-4 border-t">
+                  <h4 className="font-medium text-red-800 mb-2 flex items-center gap-2">
+                    <FileText className="h-4 w-4" />
+                    مستندات منتهية قابلة للتجديد:
+                  </h4>
+                  <div className="space-y-2">
+                    {institution.renewableExpiredDocs.map((doc: any) => (
+                      <div key={doc.id} className="flex items-center justify-between p-2 bg-red-50 rounded text-sm">
+                        <span className="font-medium">{doc.name || doc.documentType}</span>
+                        <div className="flex items-center gap-2">
+                          <span className="text-red-600">منتهي منذ {Math.floor((new Date().getTime() - new Date(doc.expiryDate).getTime()) / (1000 * 60 * 60 * 24))} يوم</span>
+                          <Badge variant="outline" className="text-xs bg-green-50 text-green-700">قابل للتجديد</Badge>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* تفاصيل المستندات غير القابلة للتجديد */}
+              {institution.nonRenewableExpiredDocs.length > 0 && (
+                <div className="mb-4 pt-4 border-t">
+                  <h4 className="font-medium text-gray-800 mb-2 flex items-center gap-2">
+                    <FileX className="h-4 w-4" />
+                    مستندات منتهية غير قابلة للتجديد:
+                  </h4>
+                  <div className="space-y-2">
+                    {institution.nonRenewableExpiredDocs.map((doc: any) => (
+                      <div key={doc.id} className="flex items-center justify-between p-2 bg-gray-50 rounded text-sm">
+                        <span className="font-medium">{doc.name || doc.documentType}</span>
+                        <div className="flex items-center gap-2">
+                          <span className="text-gray-600">منتهي منذ {Math.floor((new Date().getTime() - new Date(doc.expiryDate).getTime()) / (1000 * 60 * 60 * 24))} يوم</span>
+                          <Badge variant="secondary" className="text-xs bg-gray-100 text-gray-700">غير قابل للتجديد</Badge>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* تفاصيل المستندات التي تنتهي قريباً */}
+              {institution.expiringSoonDocs.length > 0 && (
+                <div className="mb-4 pt-4 border-t">
+                  <h4 className="font-medium text-orange-800 mb-2 flex items-center gap-2">
+                    <FileWarning className="h-4 w-4" />
+                    مستندات تنتهي قريباً:
+                  </h4>
+                  <div className="space-y-2">
+                    {institution.expiringSoonDocs.map((doc: any) => (
+                      <div key={doc.id} className="flex items-center justify-between p-2 bg-orange-50 rounded text-sm">
+                        <span className="font-medium">{doc.name || doc.documentType}</span>
+                        <span className="text-orange-600">ينتهي خلال {Math.ceil((new Date(doc.expiryDate).getTime() - new Date().getTime()) / (1000 * 60 * 60 * 24))} يوم</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* تفاصيل الاشتراكات */}
+              {(institution.expiredSubs.length > 0 || institution.expiringSoonSubs.length > 0) && (
+                <div className="mb-4 pt-4 border-t">
+                  <h4 className="font-medium text-blue-800 mb-2 flex items-center gap-2">
+                    <CreditCard className="h-4 w-4" />
+                    تفاصيل الاشتراكات:
+                  </h4>
+                  <div className="space-y-2">
+                    {institution.expiredSubs.map((sub: any) => (
+                      <div key={sub.id} className="flex items-center justify-between p-2 bg-red-50 rounded text-sm">
+                        <span className="font-medium">{sub.name}</span>
+                        <span className="text-red-600">منتهي منذ {Math.floor((new Date().getTime() - new Date(sub.expiryDate).getTime()) / (1000 * 60 * 60 * 24))} يوم</span>
+                      </div>
+                    ))}
+                    {institution.expiringSoonSubs.map((sub: any) => (
+                      <div key={sub.id} className="flex items-center justify-between p-2 bg-orange-50 rounded text-sm">
+                        <span className="font-medium">{sub.name}</span>
+                        <span className="text-orange-600">ينتهي خلال {Math.ceil((new Date(sub.expiryDate).getTime() - new Date().getTime()) / (1000 * 60 * 60 * 24))} يوم</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
 
               <div className="mt-3 flex justify-end">
                 <Button variant="outline" size="sm" asChild>
@@ -281,7 +513,7 @@ function InstitutionExpiryStats() {
 }
 
 // Dashboard component with real API data
-export default function Dashboard() {
+function DashboardContent() {
   // Fetch real data from APIs using simplified hooks
   const { institutions, loading: institutionsLoading, refetch: refetchInstitutions } = useInstitutions();
   const { employees, loading: employeesLoading, refetch: refetchEmployees } = useEmployees();
@@ -851,9 +1083,19 @@ function AddInstitutionForm({ setOpen, onSuccess }: { setOpen: (open: boolean) =
         </CardContent>
       </Card>
 
-      {/* Institution Documents & Subscriptions Status */}
-      <InstitutionExpiryStats />
+
+
+      {/* إحصائيات المستندات والاشتراكات المنتهية */}
+      <DocumentExpiryStats />
 
     </div>
+  );
+}
+
+export default function Dashboard() {
+  return (
+    <RefreshProvider>
+      <DashboardContent />
+    </RefreshProvider>
   );
 }

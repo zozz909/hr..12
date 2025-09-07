@@ -3,6 +3,7 @@
 'use client';
 import { notFound } from 'next/navigation';
 import { institutionApi, employeeApi, branchApi, subscriptionApi, documentApi } from '@/lib/api-client';
+import { useGlobalRefresh, RefreshProvider } from '@/hooks/use-refresh-context';
 import { Institution, Employee, Branch } from '@/types';
 import { getDaysRemaining, DocumentStatus, Subscription } from '@/lib/data';
 import {
@@ -1120,10 +1121,11 @@ function DeleteInstitutionDialog({ institution, onSuccess }: {
   );
 }
 
-export default function InstitutionPage({ params }: { params: Promise<{ id: string }> }) {
+function InstitutionPageContent({ params }: { params: Promise<{ id: string }> }) {
   const { id } = React.use(params);
   const { toast } = useToast();
   const router = useRouter();
+  const { refreshDashboardStats } = useGlobalRefresh();
 
   // State for data
   const [institution, setInstitution] = React.useState<Institution | null>(null);
@@ -1271,6 +1273,7 @@ export default function InstitutionPage({ params }: { params: Promise<{ id: stri
         setRenewingSubscription(null);
         setRenewalPeriod('');
         fetchData(); // Refresh data
+        refreshDashboardStats(); // تحديث إحصائيات الصفحة الرئيسية
       } else {
         toast({
           title: "خطأ في التجديد",
@@ -1311,6 +1314,7 @@ export default function InstitutionPage({ params }: { params: Promise<{ id: stri
         setRenewingDocument(null);
         setDocumentRenewalPeriod('');
         fetchData(); // Refresh data
+        refreshDashboardStats(); // تحديث إحصائيات الصفحة الرئيسية
       } else {
         toast({
           title: "خطأ في التجديد",
@@ -1353,6 +1357,7 @@ export default function InstitutionPage({ params }: { params: Promise<{ id: stri
         setRenewingCR(false);
         setCrRenewalPeriod('');
         fetchData(); // Refresh data
+        refreshDashboardStats(); // تحديث إحصائيات الصفحة الرئيسية
       } else {
         toast({
           title: "خطأ في التجديد",
@@ -2400,6 +2405,14 @@ function EditSubscriptionDialog({
         </form>
       </DialogContent>
     </Dialog>
+  );
+}
+
+export default function InstitutionPage({ params }: { params: Promise<{ id: string }> }) {
+  return (
+    <RefreshProvider>
+      <InstitutionPageContent params={params} />
+    </RefreshProvider>
   );
 }
 

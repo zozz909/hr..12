@@ -10,9 +10,23 @@ export default {
   theme: {
     extend: {
       fontFamily: {
-        body: ['"Cairo"', 'sans-serif'],
-        headline: ['"Cairo"', 'sans-serif'],
-        code: ['monospace'],
+        sans: ['"Cairo"', 'ui-sans-serif', 'system-ui', 'sans-serif'],
+        body: ['"Cairo"', 'ui-sans-serif', 'system-ui', 'sans-serif'],
+        headline: ['"Cairo"', 'ui-sans-serif', 'system-ui', 'sans-serif'],
+        arabic: ['"Cairo"', 'ui-sans-serif', 'system-ui', 'sans-serif'],
+        code: ['ui-monospace', 'SFMono-Regular', 'Menlo', 'Monaco', 'Consolas', 'monospace'],
+      },
+      fontSize: {
+        'xs': ['0.75rem', { lineHeight: '1.5' }],
+        'sm': ['0.875rem', { lineHeight: '1.6' }],
+        'base': ['1rem', { lineHeight: '1.6' }],
+        'lg': ['1.125rem', { lineHeight: '1.6' }],
+        'xl': ['1.25rem', { lineHeight: '1.6' }],
+        '2xl': ['1.5rem', { lineHeight: '1.5' }],
+        '3xl': ['1.875rem', { lineHeight: '1.4' }],
+        '4xl': ['2.25rem', { lineHeight: '1.3' }],
+        '5xl': ['3rem', { lineHeight: '1.2' }],
+        '6xl': ['3.75rem', { lineHeight: '1.1' }],
       },
       colors: {
         background: 'hsl(var(--background))',

@@ -100,6 +100,7 @@ export async function GET(request: NextRequest) {
           ed.document_type as documentType, ed.file_name as fileName,
           ed.file_path as filePath, ed.file_url as fileUrl,
           ed.expiry_date as expiryDate, ed.status,
+          NULL as isRenewable,
           ed.upload_date as uploadDate, ed.created_at as createdAt,
           e.name as entityName
         FROM employee_documents ed

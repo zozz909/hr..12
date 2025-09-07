@@ -1,14 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { SubscriptionModel } from '@/lib/models/Subscription';
-import { z } from 'zod';
-
-// Validation schema for subscription updates
-const updateSubscriptionSchema = z.object({
-  name: z.string().min(1, 'Subscription name is required').optional(),
-  icon: z.string().optional(),
-  expiryDate: z.string().optional(),
-  status: z.enum(['active', 'expired', 'expiring_soon']).optional()
-});
 
 // GET /api/subscriptions/[id] - Get subscription by ID
 export async function GET(
@@ -17,6 +8,14 @@ export async function GET(
 ) {
   try {
     const { id } = await params;
+
+    if (!id) {
+      return NextResponse.json(
+        { success: false, error: 'Subscription ID is required' },
+        { status: 400 }
+      );
+    }
+
     const subscription = await SubscriptionModel.findById(id);
 
     if (!subscription) {
@@ -30,11 +29,14 @@ export async function GET(
       success: true,
       data: subscription
     });
-
   } catch (error) {
     console.error('Error fetching subscription:', error);
     return NextResponse.json(
-      { success: false, error: 'Failed to fetch subscription' },
+      {
+        success: false,
+        error: 'Failed to fetch subscription',
+        message: error instanceof Error ? error.message : 'Unknown error'
+      },
       { status: 500 }
     );
   }
@@ -49,40 +51,44 @@ export async function PUT(
     const { id } = await params;
     const body = await request.json();
 
-    // Validate request body
-    const validationResult = updateSubscriptionSchema.safeParse(body);
-    if (!validationResult.success) {
+    if (!id) {
       return NextResponse.json(
-        {
-          success: false,
-          error: 'Validation failed',
-          details: validationResult.error.flatten().fieldErrors
-        },
+        { success: false, error: 'Subscription ID is required' },
         { status: 400 }
       );
     }
 
-    const data = validationResult.data;
-
-    // Update subscription
-    const subscription = await SubscriptionModel.update(id, data);
-
-    if (!subscription) {
+    // Check if subscription exists
+    const existingSubscription = await SubscriptionModel.findById(id);
+    if (!existingSubscription) {
       return NextResponse.json(
         { success: false, error: 'Subscription not found' },
         { status: 404 }
       );
     }
 
+    const updatedSubscription = await SubscriptionModel.update(id, body);
+
+    if (!updatedSubscription) {
+      return NextResponse.json(
+        { success: false, error: 'Failed to update subscription' },
+        { status: 500 }
+      );
+    }
+
     return NextResponse.json({
       success: true,
-      data: subscription
+      data: updatedSubscription,
+      message: 'Subscription updated successfully'
     });
-
   } catch (error) {
     console.error('Error updating subscription:', error);
     return NextResponse.json(
-      { success: false, error: 'Failed to update subscription' },
+      {
+        success: false,
+        error: 'Failed to update subscription',
+        message: error instanceof Error ? error.message : 'Unknown error'
+      },
       { status: 500 }
     );
   }
@@ -95,12 +101,29 @@ export async function DELETE(
 ) {
   try {
     const { id } = await params;
+
+    if (!id) {
+      return NextResponse.json(
+        { success: false, error: 'Subscription ID is required' },
+        { status: 400 }
+      );
+    }
+
+    // Check if subscription exists
+    const existingSubscription = await SubscriptionModel.findById(id);
+    if (!existingSubscription) {
+      return NextResponse.json(
+        { success: false, error: 'Subscription not found' },
+        { status: 404 }
+      );
+    }
+
     const success = await SubscriptionModel.delete(id);
 
     if (!success) {
       return NextResponse.json(
-        { success: false, error: 'Subscription not found' },
-        { status: 404 }
+        { success: false, error: 'Failed to delete subscription' },
+        { status: 500 }
       );
     }
 
@@ -108,11 +131,14 @@ export async function DELETE(
       success: true,
       message: 'Subscription deleted successfully'
     });
-
   } catch (error) {
     console.error('Error deleting subscription:', error);
     return NextResponse.json(
-      { success: false, error: 'Failed to delete subscription' },
+      {
+        success: false,
+        error: 'Failed to delete subscription',
+        message: error instanceof Error ? error.message : 'Unknown error'
+      },
       { status: 500 }
     );
   }
