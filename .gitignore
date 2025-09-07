@@ -43,3 +43,6 @@ next-env.d.ts
 # firebase
 firebase-debug.log
 firestore-debug.log
+
+# uploads directory - contains user uploaded files that shouldn't be in version control
+/public/uploads/
