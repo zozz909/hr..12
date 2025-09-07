@@ -15,7 +15,8 @@ const documentSchema = z.object({
   expiryDate: z.string().optional().nullable(),
   originalName: z.string().optional(),
   fileSize: z.number().optional(),
-  mimeType: z.string().optional()
+  mimeType: z.string().optional(),
+  isRenewable: z.boolean().optional()
 });
 
 // GET /api/documents - Get documents with filtering
@@ -72,7 +73,8 @@ export async function GET(request: NextRequest) {
           id.id, id.institution_id as entityId, 'institution' as entityType,
           id.document_type as documentType, id.name as fileName,
           id.file_path as filePath, id.file_url as fileUrl,
-          NULL as expiryDate, 'active' as status,
+          id.expiry_date as expiryDate, id.status,
+          id.is_renewable as isRenewable,
           id.upload_date as uploadDate, id.created_at as createdAt,
           i.name as entityName
         FROM institution_documents id
@@ -109,7 +111,8 @@ export async function GET(request: NextRequest) {
           id.id, id.institution_id as entityId, 'institution' as entityType,
           id.document_type as documentType, id.name as fileName,
           id.file_path as filePath, id.file_url as fileUrl,
-          NULL as expiryDate, 'active' as status,
+          id.expiry_date as expiryDate, id.status,
+          id.is_renewable as isRenewable,
           id.upload_date as uploadDate, id.created_at as createdAt,
           i.name as entityName
         FROM institution_documents id
@@ -139,10 +142,16 @@ export async function GET(request: NextRequest) {
 
     const documents = await executeQuery(query, values);
 
+    // تحويل isRenewable من 0/1 إلى boolean
+    const processedDocuments = documents.map(doc => ({
+      ...doc,
+      isRenewable: Boolean(doc.isRenewable)
+    }));
+
     return NextResponse.json({
       success: true,
-      data: documents,
-      count: documents.length
+      data: processedDocuments,
+      count: processedDocuments.length
     });
   } catch (error) {
     console.error('Error fetching documents:', error);
@@ -221,7 +230,9 @@ export async function POST(request: NextRequest) {
         name: documentData.fileName,
         filePath: documentData.filePath,
         fileUrl: documentData.fileUrl,
-        documentType: documentData.documentType as any
+        documentType: documentData.documentType as any,
+        isRenewable: (documentData as any).isRenewable || false,
+        expiryDate: documentData.expiryDate
       });
 
       return NextResponse.json(

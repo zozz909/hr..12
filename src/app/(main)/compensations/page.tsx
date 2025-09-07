@@ -1,105 +1,401 @@
-
 'use client';
-import * as React from 'react';
-import {
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
-  CardDescription,
-} from '@/components/ui/card';
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table';
-import { Button, buttonVariants } from '@/components/ui/button';
+
+import React from 'react';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import {
-  PlusCircle,
-  ArrowDownCircle,
-  ArrowUpCircle,
-  MoreHorizontal,
-  TrendingDown,
-  TrendingUp,
-  Edit,
-  Trash2,
-} from 'lucide-react';
-import { getAllCompensations } from '@/lib/data';
-import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { cn } from '@/lib/utils';
 import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-  AlertDialogTrigger,
-} from "@/components/ui/alert-dialog"
-
-const summaryCards = [
-    {
-        title: 'إجمالي الخصومات (هذا الشهر)',
-        amount: '1,250 ريال',
-        icon: ArrowDownCircle,
-        trend: '-15% عن الشهر الماضي',
-        trendColor: 'text-green-500', // Negative trend is good for deductions
-        trendIcon: TrendingDown,
-    },
-    {
-        title: 'إجمالي المكافآت (هذا الشهر)',
-        amount: '3,800 ريال',
-        icon: ArrowUpCircle,
-        trend: '+20% عن الشهر الماضي',
-        trendColor: 'text-green-500',
-        trendIcon: TrendingUp,
-    }
-];
-
-const transactionTypeMap = {
-    deduction: { text: 'خصم', variant: 'destructive' as const },
-    reward: { text: 'مكافأة', variant: 'default' as const }
-};
-
-function DeleteCompensationAlert() {
-  return (
-    <AlertDialog>
-      <AlertDialogTrigger asChild>
-         <DropdownMenuItem onSelect={(e) => e.preventDefault()} className="text-destructive">
-            <Trash2 className="ml-2 h-4 w-4" />
-            <span>حذف</span>
-        </DropdownMenuItem>
-      </AlertDialogTrigger>
-      <AlertDialogContent>
-        <AlertDialogHeader>
-          <AlertDialogTitle>هل أنت متأكد تمامًا؟</AlertDialogTitle>
-          <AlertDialogDescription>
-            سيؤدي هذا الإجراء إلى حذف هذه الحركة (خصم/مكافأة) بشكل دائم. لا يمكن التراجع عن هذا الإجراء.
-          </AlertDialogDescription>
-        </AlertDialogHeader>
-        <AlertDialogFooter>
-          <AlertDialogCancel>إلغاء</AlertDialogCancel>
-          <AlertDialogAction className={cn(buttonVariants({variant: "destructive"}))}>حذف</AlertDialogAction>
-        </AlertDialogFooter>
-      </AlertDialogContent>
-    </AlertDialog>
-  )
-}
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Textarea } from '@/components/ui/textarea';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import { useToast } from '@/hooks/use-toast';
+import { 
+  ArrowUpCircle, 
+  ArrowDownCircle, 
+  MoreHorizontal, 
+  Edit, 
+  Trash2,
+  TrendingUp,
+  TrendingDown,
+  DollarSign,
+  Users,
+  Calendar,
+  Plus
+} from 'lucide-react';
+import { compensationApi, type Compensation, type CompensationStats } from '@/lib/api/compensations';
+import { employeeApi, type Employee } from '@/lib/api/employees';
+import { cn } from '@/lib/utils';
 
 export default function CompensationsPage() {
-    const compensations = getAllCompensations();
+  const { toast } = useToast();
+  
+  // State management
+  const [compensations, setCompensations] = React.useState<Compensation[]>([]);
+  const [employees, setEmployees] = React.useState<Employee[]>([]);
+  const [stats, setStats] = React.useState<CompensationStats>({
+    totalRewards: 0,
+    totalDeductions: 0,
+    rewardCount: 0,
+    deductionCount: 0,
+    netAmount: 0
+  });
+  const [loading, setLoading] = React.useState(true);
+  const [employeeSearch, setEmployeeSearch] = React.useState('');
+
+  // Dialog states
+  const [newCompensationDialog, setNewCompensationDialog] = React.useState(false);
+  const [editCompensationDialog, setEditCompensationDialog] = React.useState(false);
+  const [deleteConfirmDialog, setDeleteConfirmDialog] = React.useState(false);
+  
+  // Form data
+  const [newCompensationData, setNewCompensationData] = React.useState({
+    employeeId: '',
+    type: 'reward' as 'deduction' | 'reward',
+    amount: '',
+    reason: '',
+    date: new Date().toISOString().split('T')[0]
+  });
+  
+  const [editCompensationData, setEditCompensationData] = React.useState({
+    id: '',
+    employeeId: '',
+    type: 'reward' as 'deduction' | 'reward',
+    amount: '',
+    reason: '',
+    date: ''
+  });
+  
+  const [deleteCompensationId, setDeleteCompensationId] = React.useState('');
+  const [submitting, setSubmitting] = React.useState(false);
+
+  // Fetch data from API
+  const fetchData = async () => {
+    try {
+      setLoading(true);
+
+      const [compensationsRes, employeesRes, statsRes] = await Promise.all([
+        compensationApi.getAll(),
+        employeeApi.getAll(),
+        compensationApi.getStats()
+      ]);
+
+      if (compensationsRes.success) {
+        setCompensations(compensationsRes.data || []);
+      } else {
+        toast({
+          title: "خطأ في تحميل الخصومات والمكافآت",
+          description: compensationsRes.error || "حدث خطأ أثناء تحميل البيانات",
+          variant: "destructive",
+        });
+      }
+
+      if (employeesRes.success) {
+        setEmployees(employeesRes.data || []);
+      } else {
+        toast({
+          title: "خطأ في تحميل الموظفين",
+          description: employeesRes.error || "حدث خطأ أثناء تحميل بيانات الموظفين",
+          variant: "destructive",
+        });
+      }
+
+      if (statsRes.success) {
+        setStats(statsRes.data || {
+          totalRewards: 0,
+          totalDeductions: 0,
+          rewardCount: 0,
+          deductionCount: 0,
+          netAmount: 0
+        });
+      }
+
+    } catch (error) {
+      console.error('Error fetching data:', error);
+      toast({
+        title: "خطأ في تحميل البيانات",
+        description: "حدث خطأ أثناء تحميل البيانات",
+        variant: "destructive",
+      });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  React.useEffect(() => {
+    fetchData();
+  }, []);
+
+  // Handle create new compensation
+  const handleCreateCompensation = async () => {
+    if (!newCompensationData.employeeId || !newCompensationData.amount || !newCompensationData.reason) {
+      toast({
+        title: "بيانات ناقصة",
+        description: "يرجى ملء جميع الحقول المطلوبة",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    const amount = parseFloat(newCompensationData.amount);
+    if (isNaN(amount) || amount <= 0) {
+      toast({
+        title: "مبلغ غير صحيح",
+        description: "يرجى إدخال مبلغ صحيح أكبر من صفر",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    try {
+      setSubmitting(true);
+
+      const response = await compensationApi.create({
+        employeeId: newCompensationData.employeeId,
+        type: newCompensationData.type,
+        amount: amount,
+        reason: newCompensationData.reason,
+        date: newCompensationData.date
+      });
+
+      if (response.success) {
+        toast({
+          title: "تم إنشاء الحركة",
+          description: `تم إنشاء ${newCompensationData.type === 'reward' ? 'المكافأة' : 'الخصم'} بنجاح`,
+        });
+
+        setNewCompensationDialog(false);
+        setNewCompensationData({
+          employeeId: '',
+          type: 'reward',
+          amount: '',
+          reason: '',
+          date: new Date().toISOString().split('T')[0]
+        });
+
+        // Refresh data
+        fetchData();
+      } else {
+        toast({
+          title: "خطأ في إنشاء الحركة",
+          description: response.error || "حدث خطأ أثناء إنشاء الحركة",
+          variant: "destructive",
+        });
+      }
+
+    } catch (error) {
+      toast({
+        title: "خطأ في إنشاء الحركة",
+        description: "حدث خطأ أثناء إنشاء الحركة",
+        variant: "destructive",
+      });
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  // Handle edit compensation
+  const handleEditCompensation = async () => {
+    if (!editCompensationData.amount || !editCompensationData.reason) {
+      toast({
+        title: "بيانات ناقصة",
+        description: "يرجى ملء جميع الحقول المطلوبة",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    const amount = parseFloat(editCompensationData.amount);
+    if (isNaN(amount) || amount <= 0) {
+      toast({
+        title: "مبلغ غير صحيح",
+        description: "يرجى إدخال مبلغ صحيح أكبر من صفر",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    try {
+      setSubmitting(true);
+
+      const response = await compensationApi.update(editCompensationData.id, {
+        employeeId: editCompensationData.employeeId,
+        type: editCompensationData.type,
+        amount: amount,
+        reason: editCompensationData.reason,
+        date: editCompensationData.date
+      });
+
+      if (response.success) {
+        toast({
+          title: "تم تحديث الحركة",
+          description: "تم تحديث الحركة بنجاح",
+        });
+
+        setEditCompensationDialog(false);
+
+        // Refresh data
+        fetchData();
+      } else {
+        toast({
+          title: "خطأ في تحديث الحركة",
+          description: response.error || "حدث خطأ أثناء تحديث الحركة",
+          variant: "destructive",
+        });
+      }
+
+    } catch (error) {
+      toast({
+        title: "خطأ في تحديث الحركة",
+        description: "حدث خطأ أثناء تحديث الحركة",
+        variant: "destructive",
+      });
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  // Handle delete compensation
+  const handleDeleteCompensation = async () => {
+    try {
+      setSubmitting(true);
+
+      const response = await compensationApi.delete(deleteCompensationId);
+
+      if (response.success) {
+        toast({
+          title: "تم حذف الحركة",
+          description: "تم حذف الحركة بنجاح",
+        });
+
+        setDeleteConfirmDialog(false);
+        setDeleteCompensationId('');
+
+        // Refresh data
+        fetchData();
+      } else {
+        toast({
+          title: "خطأ في حذف الحركة",
+          description: response.error || "حدث خطأ أثناء حذف الحركة",
+          variant: "destructive",
+        });
+      }
+
+    } catch (error) {
+      toast({
+        title: "خطأ في حذف الحركة",
+        description: "حدث خطأ أثناء حذف الحركة",
+        variant: "destructive",
+      });
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  // Open edit dialog
+  const openEditDialog = (compensation: Compensation) => {
+    setEditCompensationData({
+      id: compensation.id,
+      employeeId: compensation.employeeId,
+      type: compensation.type,
+      amount: compensation.amount.toString(),
+      reason: compensation.reason,
+      date: compensation.date
+    });
+    setEditCompensationDialog(true);
+  };
+
+  // Open delete dialog
+  const openDeleteDialog = (compensationId: string) => {
+    setDeleteCompensationId(compensationId);
+    setDeleteConfirmDialog(true);
+  };
+
+  // Format currency
+  const formatCurrency = (amount: number) => {
+    return new Intl.NumberFormat('ar-SA', {
+      style: 'currency',
+      currency: 'SAR'
+    }).format(amount);
+  };
+
+  // Format date
+  const formatDate = (dateStr: string) => {
+    return new Date(dateStr).toLocaleDateString('ar-SA');
+  };
+
+  // Statistics cards data
+  const statsCards = [
+    {
+      title: 'إجمالي المكافآت',
+      value: formatCurrency(stats.totalRewards),
+      count: `${stats.rewardCount} مكافأة`,
+      icon: ArrowUpCircle,
+      trend: 'إيجابي',
+      trendIcon: TrendingUp,
+      trendColor: 'text-green-500',
+      bgColor: 'bg-green-50',
+      iconColor: 'text-green-600'
+    },
+    {
+      title: 'إجمالي الخصومات',
+      value: formatCurrency(stats.totalDeductions),
+      count: `${stats.deductionCount} خصم`,
+      icon: ArrowDownCircle,
+      trend: 'سلبي',
+      trendIcon: TrendingDown,
+      trendColor: 'text-red-500',
+      bgColor: 'bg-red-50',
+      iconColor: 'text-red-600'
+    },
+    {
+      title: 'الصافي',
+      value: formatCurrency(stats.netAmount),
+      count: `${stats.rewardCount + stats.deductionCount} حركة`,
+      icon: DollarSign,
+      trend: stats.netAmount >= 0 ? 'إيجابي' : 'سلبي',
+      trendIcon: stats.netAmount >= 0 ? TrendingUp : TrendingDown,
+      trendColor: stats.netAmount >= 0 ? 'text-green-500' : 'text-red-500',
+      bgColor: stats.netAmount >= 0 ? 'bg-blue-50' : 'bg-orange-50',
+      iconColor: stats.netAmount >= 0 ? 'text-blue-600' : 'text-orange-600'
+    }
+  ];
+
+  if (loading) {
+    return (
+      <div className="p-4 sm:p-6 lg:p-8">
+        <div className="flex items-center justify-center h-64">
+          <div className="text-center">
+            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto"></div>
+            <p className="mt-2 text-muted-foreground">جاري تحميل البيانات...</p>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="p-4 sm:p-6 lg:p-8">
@@ -113,40 +409,64 @@ export default function CompensationsPage() {
           </p>
         </div>
         <div className="flex gap-2">
-          <Button variant="outline">
+          <Button 
+            variant="outline"
+            onClick={() => {
+              setNewCompensationData(prev => ({ ...prev, type: 'deduction' }));
+              setNewCompensationDialog(true);
+            }}
+          >
             <ArrowDownCircle className="ml-2 h-4 w-4" />
             إضافة خصم
           </Button>
-          <Button>
+          <Button
+            onClick={() => {
+              setNewCompensationData(prev => ({ ...prev, type: 'reward' }));
+              setNewCompensationDialog(true);
+            }}
+          >
             <ArrowUpCircle className="ml-2 h-4 w-4" />
             إضافة مكافأة
           </Button>
         </div>
       </header>
 
-      <section className="mb-8 grid grid-cols-1 gap-4 md:grid-cols-2">
-          {summaryCards.map(card => (
-               <Card key={card.title}>
-               <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                 <CardTitle className="text-sm font-medium">{card.title}</CardTitle>
-                 <card.icon className="h-4 w-4 text-muted-foreground" />
-               </CardHeader>
-               <CardContent>
-                 <div className="text-2xl font-bold">{card.amount}</div>
-                 <p className="text-xs text-muted-foreground flex items-center gap-1">
-                   <card.trendIcon className={cn('h-3 w-3', card.trendColor)} />
-                   <span className={card.trendColor}>{card.trend}</span>
-                 </p>
-               </CardContent>
-             </Card>
-          ))}
+      {/* Statistics Cards */}
+      <section className="mb-8 grid grid-cols-1 gap-4 md:grid-cols-3">
+        {statsCards.map((card, index) => (
+          <Card key={index}>
+            <CardContent className="p-6">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm font-medium text-muted-foreground">
+                    {card.title}
+                  </p>
+                  <p className="text-2xl font-bold">{card.value}</p>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    {card.count}
+                  </p>
+                </div>
+                <div className={cn("rounded-full p-3", card.bgColor)}>
+                  <card.icon className={cn("h-6 w-6", card.iconColor)} />
+                </div>
+              </div>
+              <div className="mt-4 flex items-center gap-2">
+                <card.trendIcon className={cn("h-4 w-4", card.trendColor)} />
+                <span className={cn("text-sm", card.trendColor)}>
+                  {card.trend}
+                </span>
+              </div>
+            </CardContent>
+          </Card>
+        ))}
       </section>
 
+      {/* Compensations Table */}
       <Card>
         <CardHeader>
-          <CardTitle>سجل الحركات الأخير</CardTitle>
+          <CardTitle>سجل الحركات</CardTitle>
           <CardDescription>
-            قائمة بآخر الخصومات والمكافآت المسجلة للموظفين.
+            قائمة بجميع الخصومات والمكافآت المسجلة للموظفين.
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -162,63 +482,286 @@ export default function CompensationsPage() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {compensations.map((item) => (
-                <TableRow key={item.id}>
-                   <TableCell>
+              {compensations.length === 0 ? (
+                <TableRow>
+                  <TableCell colSpan={6} className="text-center py-8">
+                    <div className="text-muted-foreground">
+                      <DollarSign className="mx-auto h-12 w-12 mb-4 opacity-50" />
+                      <p>لا توجد حركات مسجلة</p>
+                      <p className="text-sm">ابدأ بإضافة مكافأة أو خصم للموظفين</p>
+                    </div>
+                  </TableCell>
+                </TableRow>
+              ) : (
+                compensations.map((compensation) => (
+                  <TableRow key={compensation.id}>
+                    <TableCell>
                       <div className="flex items-center gap-3">
                         <Avatar className="h-9 w-9">
-                          <AvatarImage src={item.employeePhotoUrl} alt={item.employeeName}/>
+                          <AvatarImage src={compensation.employeePhotoUrl} alt={compensation.employeeName} />
                           <AvatarFallback>
-                            {item.employeeName.charAt(0)}
+                            {compensation.employeeName?.charAt(0) || 'م'}
                           </AvatarFallback>
                         </Avatar>
                         <div>
-                          <p className="font-medium">{item.employeeName}</p>
-                          <p className="text-sm text-muted-foreground">
-                            {item.employeeId}
-                          </p>
+                          <div className="font-medium">{compensation.employeeName}</div>
                         </div>
                       </div>
                     </TableCell>
-                  <TableCell>
-                    <Badge variant={transactionTypeMap[item.type].variant}>
-                      {transactionTypeMap[item.type].text}
-                    </Badge>
-                  </TableCell>
-                  <TableCell className="font-medium">
-                    {item.amount.toLocaleString()} ريال
-                  </TableCell>
-                  <TableCell>{item.reason}</TableCell>
-                  <TableCell>{item.date}</TableCell>
-                  <TableCell className="text-left">
-                  <DropdownMenu>
+                    <TableCell>
+                      <Badge 
+                        variant={compensation.type === 'reward' ? 'default' : 'destructive'}
+                        className={compensation.type === 'reward' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}
+                      >
+                        {compensation.type === 'reward' ? 'مكافأة' : 'خصم'}
+                      </Badge>
+                    </TableCell>
+                    <TableCell className="font-medium">
+                      <span className={compensation.type === 'reward' ? 'text-green-600' : 'text-red-600'}>
+                        {compensation.type === 'reward' ? '+' : '-'}{formatCurrency(compensation.amount)}
+                      </span>
+                    </TableCell>
+                    <TableCell>{compensation.reason}</TableCell>
+                    <TableCell>{formatDate(compensation.date)}</TableCell>
+                    <TableCell>
+                      <DropdownMenu>
                         <DropdownMenuTrigger asChild>
-                          <Button variant="ghost" size="icon">
+                          <Button variant="ghost" className="h-8 w-8 p-0">
+                            <span className="sr-only">فتح القائمة</span>
                             <MoreHorizontal className="h-4 w-4" />
                           </Button>
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end">
-                          <DropdownMenuItem>
+                          <DropdownMenuLabel>الإجراءات</DropdownMenuLabel>
+                          <DropdownMenuItem onClick={() => openEditDialog(compensation)}>
                             <Edit className="ml-2 h-4 w-4" />
                             <span>تعديل</span>
-                            </DropdownMenuItem>
-                          <DeleteCompensationAlert />
+                          </DropdownMenuItem>
+                          <DropdownMenuSeparator />
+                          <DropdownMenuItem 
+                            onClick={() => openDeleteDialog(compensation.id)}
+                            className="text-destructive"
+                          >
+                            <Trash2 className="ml-2 h-4 w-4" />
+                            <span>حذف</span>
+                          </DropdownMenuItem>
                         </DropdownMenuContent>
                       </DropdownMenu>
-                  </TableCell>
-                </TableRow>
-              ))}
-               {compensations.length === 0 && (
-                <TableRow>
-                    <TableCell colSpan={6} className="text-center h-24">
-                        لم يتم العثور على أي حركات.
                     </TableCell>
-                </TableRow>
-               )}
+                  </TableRow>
+                ))
+              )}
             </TableBody>
           </Table>
         </CardContent>
       </Card>
+
+      {/* New Compensation Dialog */}
+      <Dialog open={newCompensationDialog} onOpenChange={setNewCompensationDialog}>
+        <DialogContent className="sm:max-w-[425px]">
+          <DialogHeader>
+            <DialogTitle>
+              {newCompensationData.type === 'reward' ? 'إضافة مكافأة' : 'إضافة خصم'}
+            </DialogTitle>
+            <DialogDescription>
+              قم بإدخال تفاصيل {newCompensationData.type === 'reward' ? 'المكافأة' : 'الخصم'} الجديد
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-4 py-4">
+            <div className="grid gap-2">
+              <Label htmlFor="employee">الموظف</Label>
+              <div className="space-y-2">
+                <Input
+                  placeholder="ابحث عن الموظف..."
+                  value={employeeSearch}
+                  onChange={(e) => setEmployeeSearch(e.target.value)}
+                />
+                <Select
+                  value={newCompensationData.employeeId}
+                  onValueChange={(value) => setNewCompensationData(prev => ({ ...prev, employeeId: value }))}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="اختر الموظف" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {employees
+                      .filter(employee =>
+                        employee.name.toLowerCase().includes(employeeSearch.toLowerCase())
+                      )
+                      .map((employee) => (
+                        <SelectItem key={employee.id} value={employee.id}>
+                          {employee.name}
+                        </SelectItem>
+                      ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="type">نوع الحركة</Label>
+              <Select
+                value={newCompensationData.type}
+                onValueChange={(value: 'deduction' | 'reward') =>
+                  setNewCompensationData(prev => ({ ...prev, type: value }))
+                }
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="اختر نوع الحركة" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="reward">مكافأة</SelectItem>
+                  <SelectItem value="deduction">خصم</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="amount">المبلغ (ريال سعودي)</Label>
+              <Input
+                id="amount"
+                type="number"
+                step="0.01"
+                min="0"
+                placeholder="0.00"
+                value={newCompensationData.amount}
+                onChange={(e) => setNewCompensationData(prev => ({ ...prev, amount: e.target.value }))}
+              />
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="date">التاريخ</Label>
+              <Input
+                id="date"
+                type="date"
+                value={newCompensationData.date}
+                onChange={(e) => setNewCompensationData(prev => ({ ...prev, date: e.target.value }))}
+              />
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="reason">السبب</Label>
+              <Textarea
+                id="reason"
+                placeholder="اكتب سبب المكافأة أو الخصم..."
+                value={newCompensationData.reason}
+                onChange={(e) => setNewCompensationData(prev => ({ ...prev, reason: e.target.value }))}
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setNewCompensationDialog(false)}>
+              إلغاء
+            </Button>
+            <Button onClick={handleCreateCompensation} disabled={submitting}>
+              {submitting ? 'جاري الحفظ...' : 'حفظ'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Edit Compensation Dialog */}
+      <Dialog open={editCompensationDialog} onOpenChange={setEditCompensationDialog}>
+        <DialogContent className="sm:max-w-[425px]">
+          <DialogHeader>
+            <DialogTitle>تعديل الحركة</DialogTitle>
+            <DialogDescription>
+              قم بتعديل تفاصيل الحركة
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-4 py-4">
+            <div className="grid gap-2">
+              <Label htmlFor="editEmployee">الموظف</Label>
+              <Select
+                value={editCompensationData.employeeId}
+                onValueChange={(value) => setEditCompensationData(prev => ({ ...prev, employeeId: value }))}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="اختر الموظف" />
+                </SelectTrigger>
+                <SelectContent>
+                  {employees.map((employee) => (
+                    <SelectItem key={employee.id} value={employee.id}>
+                      {employee.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="editType">نوع الحركة</Label>
+              <Select
+                value={editCompensationData.type}
+                onValueChange={(value: 'deduction' | 'reward') =>
+                  setEditCompensationData(prev => ({ ...prev, type: value }))
+                }
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="اختر نوع الحركة" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="reward">مكافأة</SelectItem>
+                  <SelectItem value="deduction">خصم</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="editAmount">المبلغ (ريال سعودي)</Label>
+              <Input
+                id="editAmount"
+                type="number"
+                step="0.01"
+                min="0"
+                placeholder="0.00"
+                value={editCompensationData.amount}
+                onChange={(e) => setEditCompensationData(prev => ({ ...prev, amount: e.target.value }))}
+              />
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="editDate">التاريخ</Label>
+              <Input
+                id="editDate"
+                type="date"
+                value={editCompensationData.date}
+                onChange={(e) => setEditCompensationData(prev => ({ ...prev, date: e.target.value }))}
+              />
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="editReason">السبب</Label>
+              <Textarea
+                id="editReason"
+                placeholder="اكتب سبب المكافأة أو الخصم..."
+                value={editCompensationData.reason}
+                onChange={(e) => setEditCompensationData(prev => ({ ...prev, reason: e.target.value }))}
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setEditCompensationDialog(false)}>
+              إلغاء
+            </Button>
+            <Button onClick={handleEditCompensation} disabled={submitting}>
+              {submitting ? 'جاري التحديث...' : 'تحديث'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Delete Confirmation Dialog */}
+      <Dialog open={deleteConfirmDialog} onOpenChange={setDeleteConfirmDialog}>
+        <DialogContent className="sm:max-w-[425px]">
+          <DialogHeader>
+            <DialogTitle>تأكيد الحذف</DialogTitle>
+            <DialogDescription>
+              هل أنت متأكد من حذف هذه الحركة؟ لا يمكن التراجع عن هذا الإجراء.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDeleteConfirmDialog(false)}>
+              إلغاء
+            </Button>
+            <Button variant="destructive" onClick={handleDeleteCompensation} disabled={submitting}>
+              {submitting ? 'جاري الحذف...' : 'حذف'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

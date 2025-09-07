@@ -1,12 +1,16 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { EmployeeModel } from '@/lib/models/Employee';
 import { z } from 'zod';
+import { requirePermission, unauthorizedResponse, unauthenticatedResponse } from '@/lib/auth-utils';
 
 // Validation schema for employee updates
 const updateEmployeeSchema = z.object({
   name: z.string().min(1, 'Employee name is required').optional(),
-  photoUrl: z.string().url().optional().or(z.literal('')),
+  photoUrl: z.string().optional().or(z.literal('')),
   mobile: z.string().optional(),
+  email: z.string().email('Invalid email format').optional().or(z.literal('')),
+  nationality: z.string().min(1, 'Nationality is required').optional(),
+  position: z.string().optional(),
   iqamaNumber: z.string().optional(),
   iqamaExpiry: z.string().optional(),
   healthInsuranceExpiry: z.string().optional(),
@@ -16,6 +20,7 @@ const updateEmployeeSchema = z.object({
   institutionId: z.string().nullable().optional(),
   salary: z.number().min(0, 'Salary must be non-negative').optional(),
   fileNumber: z.string().optional(),
+  hireDate: z.string().optional(),
   status: z.enum(['active', 'archived']).optional(),
   unsponsoredReason: z.enum(['transferred', 'new', 'temporary_hold']).nullable().optional(),
   archiveReason: z.enum(['resignation', 'termination', 'retirement', 'transfer', 'contract_end', 'medical_leave', 'disciplinary', 'other']).nullable().optional(),
@@ -31,7 +36,7 @@ const transferEmployeeSchema = z.object({
 
 // Archive employee schema
 const archiveEmployeeSchema = z.object({
-  reason: z.enum(['terminated', 'final_exit'])
+  reason: z.enum(['resignation', 'termination', 'retirement', 'transfer', 'contract_end', 'medical_leave', 'disciplinary', 'other', 'terminated', 'final_exit'])
 });
 
 // GET /api/employees/[id] - Get specific employee
@@ -63,7 +68,14 @@ export async function GET(
     const includeDocuments = searchParams.get('include_documents') === 'true';
 
     if (includeDocuments) {
-      employee.documents = await EmployeeModel.getDocuments(id);
+      // Get employee documents separately
+      const documents = await EmployeeModel.getDocuments(id);
+      const employeeWithDocuments = { ...employee, documents };
+
+      return NextResponse.json({
+        success: true,
+        data: employeeWithDocuments
+      });
     }
 
     return NextResponse.json({
@@ -89,6 +101,17 @@ export async function PUT(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    // التحقق من المصادقة والصلاحية
+    const { user, hasPermission } = await requirePermission(request, 'employees_edit');
+
+    if (!user) {
+      return unauthenticatedResponse();
+    }
+
+    if (!hasPermission) {
+      return unauthorizedResponse('ليس لديك صلاحية لتعديل الموظفين');
+    }
+
     const { id } = await params;
 
     if (!id) {
@@ -226,6 +249,17 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    // التحقق من المصادقة والصلاحية
+    const { user, hasPermission } = await requirePermission(request, 'employees_delete');
+
+    if (!user) {
+      return unauthenticatedResponse();
+    }
+
+    if (!hasPermission) {
+      return unauthorizedResponse('ليس لديك صلاحية لحذف الموظفين');
+    }
+
     const { id } = await params;
 
     if (!id) {
@@ -244,8 +278,28 @@ export async function DELETE(
       );
     }
 
-    // Get reason from query params or request body
+    // Check if this is a hard delete request
     const { searchParams } = new URL(request.url);
+    const hardDelete = searchParams.get('hard_delete') === 'true';
+
+    if (hardDelete) {
+      // Perform hard delete
+      const deleted = await EmployeeModel.delete(id);
+
+      if (!deleted) {
+        return NextResponse.json(
+          { success: false, error: 'Failed to delete employee' },
+          { status: 500 }
+        );
+      }
+
+      return NextResponse.json({
+        success: true,
+        message: 'Employee deleted permanently'
+      });
+    }
+
+    // Otherwise, perform soft delete (archive)
     let reason = searchParams.get('reason') as 'terminated' | 'final_exit' | null;
 
     if (!reason) {

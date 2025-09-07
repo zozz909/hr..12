@@ -28,6 +28,7 @@ import {
 import { Separator } from '@/components/ui/separator';
 import { useToast } from '@/hooks/use-toast';
 import { branchApi, employeeApi, institutionApi } from '@/lib/api-client';
+import { useDebouncedSearch } from '@/hooks/useDebounce';
 import { Branch, Employee, Institution } from '@/types';
 import { 
   Building2, 
@@ -57,7 +58,9 @@ export default function BranchDetailsPage() {
   const [institutions, setInstitutions] = React.useState<Institution[]>([]);
   const [branches, setBranches] = React.useState<Branch[]>([]);
   const [loading, setLoading] = React.useState(true);
-  const [searchTerm, setSearchTerm] = React.useState('');
+
+  // استخدام debounced search لتجنب إعادة تحميل القائمة مع كل حرف
+  const { searchTerm, debouncedSearchTerm, setSearchTerm } = useDebouncedSearch('', 300);
 
   // Fetch data
   React.useEffect(() => {
@@ -112,15 +115,15 @@ export default function BranchDetailsPage() {
     }
   }, [branchId]);
 
-  // Filter employees based on search
+  // Filter employees based on debounced search
   const filteredEmployees = React.useMemo(() => {
-    if (!searchTerm) return employees;
-    return employees.filter(emp => 
-      emp.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      emp.fileNumber?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      emp.position?.toLowerCase().includes(searchTerm.toLowerCase())
+    if (!debouncedSearchTerm) return employees;
+    return employees.filter(emp =>
+      emp.name.toLowerCase().includes(debouncedSearchTerm.toLowerCase()) ||
+      emp.fileNumber?.toLowerCase().includes(debouncedSearchTerm.toLowerCase()) ||
+      emp.position?.toLowerCase().includes(debouncedSearchTerm.toLowerCase())
     );
-  }, [employees, searchTerm]);
+  }, [employees, debouncedSearchTerm]);
 
   const refetchData = async () => {
     // Refetch branch employees

@@ -24,14 +24,35 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // Validate file type - PDF only for forms
+    if (entityType === 'form' && file.type !== 'application/pdf') {
+      return NextResponse.json(
+        { success: false, error: 'Only PDF files are allowed for forms' },
+        { status: 400 }
+      );
+    }
+
+    // Validate file size (max 10MB)
+    const maxSize = 10 * 1024 * 1024; // 10MB
+    if (file.size > maxSize) {
+      return NextResponse.json(
+        { success: false, error: 'File size too large (max 10MB)' },
+        { status: 400 }
+      );
+    }
+
     // Create unique filename
     const timestamp = Date.now();
     const fileExtension = file.name.split('.').pop();
     const fileName = `${entityType}_${entityId}_${timestamp}.${fileExtension}`;
 
+    // Determine if this is an image file
+    const isImage = file.type.startsWith('image/');
+    const folderType = isImage ? 'images' : 'documents';
+
     // Create directory path
-    const uploadDir = join(process.cwd(), 'public', 'uploads', 'documents', entityType);
-    
+    const uploadDir = join(process.cwd(), 'public', 'uploads', folderType, entityType);
+
     // Ensure directory exists
     if (!existsSync(uploadDir)) {
       await mkdir(uploadDir, { recursive: true });
@@ -46,7 +67,7 @@ export async function POST(request: NextRequest) {
     await writeFile(filePath, buffer);
 
     // Return file info
-    const fileUrl = `/uploads/documents/${entityType}/${fileName}`;
+    const fileUrl = `/uploads/${folderType}/${entityType}/${fileName}`;
 
     return NextResponse.json({
       success: true,

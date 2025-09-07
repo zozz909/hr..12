@@ -36,7 +36,7 @@ export interface Subscription {
   institutionId: string;
   name: string;
   icon?: string;
-  expiryDate: string;
+  expiryDate?: string;
   status: 'active' | 'expired' | 'expiring_soon';
   createdAt?: string;
   updatedAt?: string;
@@ -79,6 +79,12 @@ export interface Employee {
   institutionId?: string | null;
   institutionName?: string;
   salary?: number;
+  basicSalary?: number;
+  allowances?: number;
+  deductions?: number;
+  hireDate?: string;
+  employeeNumber?: string;
+  institution?: string;
   status: 'active' | 'archived';
   unsponsoredReason?: 'transferred' | 'new' | 'temporary_hold' | null;
   lastStatusUpdate?: string;
@@ -107,7 +113,7 @@ export interface Subscription {
   id: string;
   institutionId: string;
   name: string;
-  icon: string;
+  icon?: string;
   expiryDate?: string;
   status: 'active' | 'expired' | 'expiring_soon';
   createdAt?: string;

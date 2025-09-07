@@ -49,7 +49,8 @@ export async function GET(
           id.id, id.institution_id as entityId, 'institution' as entityType,
           id.document_type as documentType, id.name as fileName,
           id.file_path as filePath, id.file_url as fileUrl,
-          NULL as expiryDate, 'active' as status,
+          id.expiry_date as expiryDate, id.status,
+          id.is_renewable as isRenewable,
           id.upload_date as uploadDate, id.created_at as createdAt,
           i.name as entityName
         FROM institution_documents id
@@ -67,9 +68,15 @@ export async function GET(
       );
     }
 
+    // تحويل isRenewable من 0/1 إلى boolean
+    const document = {
+      ...results[0],
+      isRenewable: Boolean(results[0].isRenewable)
+    };
+
     return NextResponse.json({
       success: true,
-      data: results[0]
+      data: document
     });
   } catch (error) {
     console.error('Error fetching document:', error);

@@ -209,7 +209,56 @@ export const leaveRequests: LeaveRequest[] = [
 ];
 
 export const compensations: Compensation[] = [
-    // ... mock compensations
+  {
+    id: 'comp-001',
+    employeeId: 'emp-001',
+    employeeName: 'أحمد محمد علي',
+    employeePhotoUrl: '/avatars/ahmed.jpg',
+    type: 'reward',
+    amount: 1500,
+    reason: 'مكافأة الأداء المتميز للربع الأول',
+    date: '2024-03-15'
+  },
+  {
+    id: 'comp-002',
+    employeeId: 'emp-002',
+    employeeName: 'فاطمة أحمد السالم',
+    employeePhotoUrl: '/avatars/fatima.jpg',
+    type: 'deduction',
+    amount: 200,
+    reason: 'خصم تأخير (3 أيام)',
+    date: '2024-03-10'
+  },
+  {
+    id: 'comp-003',
+    employeeId: 'emp-003',
+    employeeName: 'محمد عبدالله الخالد',
+    employeePhotoUrl: '/avatars/mohammed.jpg',
+    type: 'reward',
+    amount: 2000,
+    reason: 'مكافأة إنجاز مشروع العميل الكبير',
+    date: '2024-03-08'
+  },
+  {
+    id: 'comp-004',
+    employeeId: 'emp-004',
+    employeeName: 'نورا سعد المطيري',
+    employeePhotoUrl: '/avatars/nora.jpg',
+    type: 'reward',
+    amount: 800,
+    reason: 'مكافأة تحسين العمليات',
+    date: '2024-03-05'
+  },
+  {
+    id: 'comp-005',
+    employeeId: 'emp-001',
+    employeeName: 'أحمد محمد علي',
+    employeePhotoUrl: '/avatars/ahmed.jpg',
+    type: 'deduction',
+    amount: 150,
+    reason: 'خصم كسر في المعدات',
+    date: '2024-02-28'
+  }
 ];
 
 export const payrollRuns: PayrollRun[] = [

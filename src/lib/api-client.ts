@@ -1,10 +1,10 @@
 // API Client for HR Management System
 // Centralized API calls with error handling and type safety
 
-import { Institution, Employee, ApiResponse } from '@/types';
+import { Institution, Employee, ApiResponse, Branch } from '@/types';
 
 // Base API configuration
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || '';
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || process.env.NEXT_PUBLIC_BASE_URL || (typeof window !== 'undefined' ? window.location.origin : 'http://localhost:3000');
 
 // Generic API client class
 class ApiClient {
@@ -14,11 +14,20 @@ class ApiClient {
   ): Promise<ApiResponse<T>> {
     try {
       const url = `${API_BASE_URL}/api${endpoint}`;
+
+      // إضافة token إلى headers إذا كان متوفراً
+      const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null;
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+        ...options.headers as Record<string, string>,
+      };
+
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
+      }
+
       const response = await fetch(url, {
-        headers: {
-          'Content-Type': 'application/json',
-          ...options.headers,
-        },
+        headers,
         ...options,
       });
 
@@ -168,9 +177,9 @@ export const employeeApi = {
     return apiClient.put(`/employees/${id}?action=archive`, { reason });
   },
 
-  // Delete employee (archive)
-  delete: (id: string, reason: 'terminated' | 'final_exit' = 'terminated') => {
-    return apiClient.delete(`/employees/${id}?reason=${reason}`);
+  // Delete employee permanently (hard delete)
+  delete: (id: string) => {
+    return apiClient.delete(`/employees/${id}?hard_delete=true`);
   },
 
   // Get unsponsored employees
@@ -246,6 +255,11 @@ export const documentApi = {
   // Delete document
   delete: (id: string) => {
     return apiClient.delete(`/documents/${id}`);
+  },
+
+  // Renew document
+  renew: (id: string, expiryDate: string) => {
+    return apiClient.put<any>(`/documents/${id}/renew`, { expiryDate });
   },
 
   // Get expiring documents
@@ -336,6 +350,61 @@ export const subscriptionApi = {
   delete: (id: string) => {
     return apiClient.delete(`/subscriptions/${id}`);
   }
+};
+
+// Leave Request API endpoints
+export const leaveApi = {
+  // Get all leave requests
+  getAll: (params?: {
+    employeeId?: string;
+    institutionId?: string;
+    branchId?: string;
+    status?: 'pending' | 'approved' | 'rejected';
+    leaveType?: 'annual' | 'sick' | 'unpaid' | 'emergency';
+    startDate?: string;
+    endDate?: string;
+  }) => {
+    const queryParams: Record<string, string> = {};
+    if (params?.employeeId) queryParams.employee_id = params.employeeId;
+    if (params?.institutionId) queryParams.institution_id = params.institutionId;
+    if (params?.branchId) queryParams.branch_id = params.branchId;
+    if (params?.status) queryParams.status = params.status;
+    if (params?.leaveType) queryParams.leave_type = params.leaveType;
+    if (params?.startDate) queryParams.start_date = params.startDate;
+    if (params?.endDate) queryParams.end_date = params.endDate;
+
+    return apiClient.get<any[]>('/leaves', queryParams);
+  },
+
+  // Get leave request by ID
+  getById: (id: string) => {
+    return apiClient.get<any>(`/leaves/${id}`);
+  },
+
+  // Create new leave request
+  create: (data: any) => {
+    return apiClient.post<any>('/leaves', data);
+  },
+
+  // Update leave request
+  update: (id: string, data: any) => {
+    return apiClient.put<any>(`/leaves/${id}`, data);
+  },
+
+  // Approve leave request
+  approve: (id: string, approvedBy: string) => {
+    return apiClient.put<any>(`/leaves/${id}?action=approve`, { approvedBy });
+  },
+
+  // Reject leave request
+  reject: (id: string, rejectionReason: string) => {
+    return apiClient.put<any>(`/leaves/${id}?action=reject`, { rejectionReason });
+  },
+
+  // Delete leave request
+  delete: (id: string) => {
+    return apiClient.delete(`/leaves/${id}`);
+  },
 };
 
 // API response type is now imported from @/types

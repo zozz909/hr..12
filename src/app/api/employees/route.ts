@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { EmployeeModel } from '@/lib/models/Employee';
 import { z } from 'zod';
+import { requirePermission, unauthorizedResponse, unauthenticatedResponse } from '@/lib/auth-utils';
 
 // Validation schema for employee creation/update
 const employeeSchema = z.object({
@@ -18,7 +19,7 @@ const employeeSchema = z.object({
   contractExpiry: z.string().optional(),
   healthInsuranceExpiry: z.string().optional(),
   healthCertExpiry: z.string().optional(),
-  photoUrl: z.string().url().optional().or(z.literal('')),
+  photoUrl: z.string().optional().or(z.literal('')),
   institutionId: z.string().nullable().optional(),
   status: z.enum(['active', 'archived']).optional(),
   unsponsoredReason: z.enum(['transferred', 'new', 'temporary_hold']).nullable().optional(),
@@ -29,6 +30,17 @@ const employeeSchema = z.object({
 // GET /api/employees - Get all employees with filtering
 export async function GET(request: NextRequest) {
   try {
+    // التحقق من المصادقة والصلاحية - معطل مؤقتاً للتطوير
+    // const { user, hasPermission } = await requirePermission(request, 'employees_view');
+
+    // if (!user) {
+    //   return unauthenticatedResponse();
+    // }
+
+    // if (!hasPermission) {
+    //   return unauthorizedResponse('ليس لديك صلاحية لعرض الموظفين');
+    // }
+
     const { searchParams } = new URL(request.url);
     const institutionId = searchParams.get('institution_id');
     const branchId = searchParams.get('branch_id');
@@ -90,6 +102,17 @@ export async function GET(request: NextRequest) {
 // POST /api/employees - Create new employee
 export async function POST(request: NextRequest) {
   try {
+    // التحقق من المصادقة والصلاحية
+    const { user, hasPermission } = await requirePermission(request, 'employees_add');
+
+    if (!user) {
+      return unauthenticatedResponse();
+    }
+
+    if (!hasPermission) {
+      return unauthorizedResponse('ليس لديك صلاحية لإضافة الموظفين');
+    }
+
     const body = await request.json();
 
     // Validate request body
@@ -105,7 +128,10 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const employeeData = validationResult.data;
+    const employeeData = {
+      ...validationResult.data,
+      status: validationResult.data.status || 'active'
+    };
 
     // Create employee
     const newEmployee = await EmployeeModel.create(employeeData);

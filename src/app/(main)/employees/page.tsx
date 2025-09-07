@@ -27,6 +27,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { useInstitutions, useEmployees } from '@/hooks/useHRData';
 import { useToast } from '@/hooks/use-toast';
+import { useDebouncedSearch } from '@/hooks/useDebounce';
 import { employeeApi, branchApi } from '@/lib/api-client';
 import { Employee, Branch } from '@/types';
 import Link from 'next/link';
@@ -40,7 +41,8 @@ import {
   PlusCircle,
   MoreHorizontal,
   Edit,
-  Archive
+  Archive,
+  Trash2
 } from 'lucide-react';
 import {
   DropdownMenu,
@@ -61,6 +63,16 @@ import { Label } from '@/components/ui/label';
 import { Tooltip, TooltipProvider, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from '@/components/ui/alert-dialog';
 
+// Helper functions for document status
+type DocumentStatus = 'active' | 'expiring_soon' | 'expired';
+
+const getDaysRemaining = (dateStr: string): number => {
+  if (!dateStr) return -1;
+  const expiryDate = new Date(dateStr);
+  const today = new Date();
+  const diffTime = expiryDate.getTime() - today.getTime();
+  return Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+};
 
 const getStatus = (dateStr: string): DocumentStatus => {
   const days = getDaysRemaining(dateStr);
@@ -130,19 +142,26 @@ const getDocumentStatus = (expiryDate: string | null): 'active' | 'expiring_soon
 export default function AllEmployeesPage() {
   const router = useRouter();
   const { toast } = useToast();
-  const [searchTerm, setSearchTerm] = React.useState('');
+
+  // استخدام debounced search لتجنب استدعاء API مع كل حرف
+  const { searchTerm, debouncedSearchTerm, setSearchTerm } = useDebouncedSearch('', 500);
   const [institutionFilter, setInstitutionFilter] = React.useState('all');
   const [statusFilter, setStatusFilter] = React.useState('all');
 
   // Edit dialog state
   const [editDialog, setEditDialog] = React.useState(false);
   const [editingEmployee, setEditingEmployee] = React.useState<Employee | null>(null);
+  const [editPhotoUploading, setEditPhotoUploading] = React.useState(false);
   const [editForm, setEditForm] = React.useState({
     name: '',
     phone: '',
+    email: '',
+    nationality: '',
     position: '',
     salary: '',
-    institutionId: ''
+    institutionId: '',
+    hireDate: '',
+    photoUrl: ''
   });
   const [editLoading, setEditLoading] = React.useState(false);
 
@@ -152,8 +171,14 @@ export default function AllEmployeesPage() {
   const [archiveLoading, setArchiveLoading] = React.useState(false);
   const [archiveReason, setArchiveReason] = React.useState('');
 
+  // Delete dialog state
+  const [deleteDialog, setDeleteDialog] = React.useState(false);
+  const [deletingEmployee, setDeletingEmployee] = React.useState<Employee | null>(null);
+  const [deleteLoading, setDeleteLoading] = React.useState(false);
+
   // Add employee dialog state
   const [addDialog, setAddDialog] = React.useState(false);
+  const [photoUploading, setPhotoUploading] = React.useState(false);
   const [addForm, setAddForm] = React.useState({
     name: '',
     mobile: '',
@@ -176,10 +201,10 @@ export default function AllEmployeesPage() {
   const [addLoading, setAddLoading] = React.useState(false);
   const [branches, setBranches] = React.useState<Branch[]>([]);
 
-  // Prepare filters for API call
+  // Prepare filters for API call - استخدام debouncedSearchTerm بدلاً من searchTerm
   const filters = React.useMemo(() => {
     const result: any = {};
-    if (searchTerm) result.search = searchTerm;
+    if (debouncedSearchTerm) result.search = debouncedSearchTerm;
     if (institutionFilter !== 'all') {
       if (institutionFilter === 'none') {
         result.institutionId = 'none'; // For unsponsored employees
@@ -188,7 +213,7 @@ export default function AllEmployeesPage() {
       }
     }
     return result;
-  }, [searchTerm, institutionFilter]);
+  }, [debouncedSearchTerm, institutionFilter]);
 
   // Fetch data from APIs
   const {
@@ -236,7 +261,7 @@ export default function AllEmployeesPage() {
   // Fetch branches when institution is selected
   const fetchBranches = async (institutionId: string) => {
     try {
-      const response = await branchApi.getByInstitutionId(institutionId);
+      const response = await branchApi.getAll({ institutionId });
       if (response.success) {
         setBranches(response.data || []);
       } else {
@@ -265,6 +290,78 @@ export default function AllEmployeesPage() {
     }
   };
 
+  // Handle photo upload for add employee form
+  const handlePhotoUpload = async () => {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = 'image/*';
+    input.onchange = async (e) => {
+      const file = (e.target as HTMLInputElement).files?.[0];
+      if (!file) return;
+
+      // Validate file size (max 5MB for images)
+      const maxSize = 5 * 1024 * 1024; // 5MB
+      if (file.size > maxSize) {
+        toast({
+          variant: "destructive",
+          title: "حجم الملف كبير جداً",
+          description: "يجب أن يكون حجم الصورة أقل من 5 ميجابايت",
+        });
+        return;
+      }
+
+      // Validate file type
+      if (!file.type.startsWith('image/')) {
+        toast({
+          variant: "destructive",
+          title: "نوع ملف غير صحيح",
+          description: "يرجى اختيار ملف صورة صالح",
+        });
+        return;
+      }
+
+      try {
+        setPhotoUploading(true);
+
+        const formData = new FormData();
+        formData.append('file', file);
+        formData.append('entityType', 'employee');
+        formData.append('entityId', 'temp'); // Temporary ID for new employee
+
+        const response = await fetch('/api/upload', {
+          method: 'POST',
+          body: formData,
+        });
+
+        const result = await response.json();
+
+        if (result.success) {
+          // Ensure the URL is complete
+          const fullUrl = result.data.fileUrl.startsWith('http')
+            ? result.data.fileUrl
+            : `${window.location.origin}${result.data.fileUrl}`;
+
+          setAddForm(prev => ({ ...prev, photoUrl: fullUrl }));
+          toast({
+            title: "تم رفع الصورة بنجاح",
+            description: "تم رفع صورة الموظف بنجاح",
+          });
+        } else {
+          throw new Error(result.error || 'فشل في رفع الصورة');
+        }
+      } catch (error) {
+        toast({
+          variant: "destructive",
+          title: "خطأ في رفع الصورة",
+          description: error instanceof Error ? error.message : "حدث خطأ أثناء رفع الصورة",
+        });
+      } finally {
+        setPhotoUploading(false);
+      }
+    };
+    input.click();
+  };
+
   // Handle add employee
   const handleAddEmployee = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -281,10 +378,14 @@ export default function AllEmployeesPage() {
         phone: addForm.mobile // For backward compatibility
       };
 
-      // Remove isUnsponsored from the data sent to API
-      delete employeeData.isUnsponsored;
+      // Remove isUnsponsored from the data sent to API and add status
+      const { isUnsponsored, ...cleanEmployeeData } = employeeData;
+      const finalEmployeeData = {
+        ...cleanEmployeeData,
+        status: 'active' as const
+      };
 
-      const response = await employeeApi.create(employeeData);
+      const response = await employeeApi.create(finalEmployeeData);
 
       if (response.success) {
         toast({
@@ -333,15 +434,91 @@ export default function AllEmployeesPage() {
     }
   };
 
+  // Handle photo upload for edit employee form
+  const handleEditPhotoUpload = async () => {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = 'image/*';
+    input.onchange = async (e) => {
+      const file = (e.target as HTMLInputElement).files?.[0];
+      if (!file) return;
+
+      // Validate file size (max 5MB for images)
+      const maxSize = 5 * 1024 * 1024; // 5MB
+      if (file.size > maxSize) {
+        toast({
+          variant: "destructive",
+          title: "حجم الملف كبير جداً",
+          description: "يجب أن يكون حجم الصورة أقل من 5 ميجابايت",
+        });
+        return;
+      }
+
+      // Validate file type
+      if (!file.type.startsWith('image/')) {
+        toast({
+          variant: "destructive",
+          title: "نوع ملف غير صحيح",
+          description: "يرجى اختيار ملف صورة صالح",
+        });
+        return;
+      }
+
+      try {
+        setEditPhotoUploading(true);
+
+        const formData = new FormData();
+        formData.append('file', file);
+        formData.append('entityType', 'employee');
+        formData.append('entityId', editingEmployee?.id || 'temp');
+
+        const response = await fetch('/api/upload', {
+          method: 'POST',
+          body: formData,
+        });
+
+        const result = await response.json();
+
+        if (result.success) {
+          // Ensure the URL is complete
+          const fullUrl = result.data.fileUrl.startsWith('http')
+            ? result.data.fileUrl
+            : `${window.location.origin}${result.data.fileUrl}`;
+
+          setEditForm(prev => ({ ...prev, photoUrl: fullUrl }));
+          toast({
+            title: "تم رفع الصورة بنجاح",
+            description: "تم رفع صورة الموظف بنجاح",
+          });
+        } else {
+          throw new Error(result.error || 'فشل في رفع الصورة');
+        }
+      } catch (error) {
+        toast({
+          variant: "destructive",
+          title: "خطأ في رفع الصورة",
+          description: error instanceof Error ? error.message : "حدث خطأ أثناء رفع الصورة",
+        });
+      } finally {
+        setEditPhotoUploading(false);
+      }
+    };
+    input.click();
+  };
+
   // Handle edit employee
   const handleEditEmployee = (employee: Employee) => {
     setEditingEmployee(employee);
     setEditForm({
       name: employee.name || '',
-      phone: employee.phone || '',
+      phone: employee.mobile || '',
+      email: employee.email || '',
+      nationality: employee.nationality || '',
       position: employee.position || '',
       salary: employee.salary?.toString() || '',
-      institutionId: employee.institutionId || ''
+      institutionId: employee.institutionId || 'unsponsored',
+      hireDate: employee.hireDate || '',
+      photoUrl: employee.photoUrl || ''
     });
     setEditDialog(true);
   };
@@ -354,10 +531,17 @@ export default function AllEmployeesPage() {
 
       const updateData: any = {};
       if (editForm.name !== editingEmployee.name) updateData.name = editForm.name;
-      if (editForm.phone !== editingEmployee.phone) updateData.phone = editForm.phone;
+      if (editForm.phone !== editingEmployee.mobile) updateData.mobile = editForm.phone;
+      if (editForm.email !== editingEmployee.email) updateData.email = editForm.email;
+      if (editForm.nationality !== editingEmployee.nationality) updateData.nationality = editForm.nationality;
       if (editForm.position !== editingEmployee.position) updateData.position = editForm.position;
       if (editForm.salary !== editingEmployee.salary?.toString()) updateData.salary = parseFloat(editForm.salary) || 0;
-      if (editForm.institutionId !== editingEmployee.institutionId) updateData.institutionId = editForm.institutionId;
+      const currentInstitutionId = editingEmployee.institutionId || 'unsponsored';
+      if (editForm.institutionId !== currentInstitutionId) {
+        updateData.institutionId = editForm.institutionId === 'unsponsored' ? null : editForm.institutionId;
+      }
+      if (editForm.hireDate !== editingEmployee.hireDate) updateData.hireDate = editForm.hireDate;
+      if (editForm.photoUrl !== (editingEmployee.photoUrl || '')) updateData.photoUrl = editForm.photoUrl;
 
       if (Object.keys(updateData).length === 0) {
         toast({
@@ -406,6 +590,12 @@ export default function AllEmployeesPage() {
     setArchiveDialog(true);
   };
 
+  // Handle delete employee (hard delete)
+  const handleDeleteEmployee = (employee: Employee) => {
+    setDeletingEmployee(employee);
+    setDeleteDialog(true);
+  };
+
   const handleConfirmArchive = async () => {
     if (!archivingEmployee || !archiveReason) {
       toast({
@@ -419,13 +609,18 @@ export default function AllEmployeesPage() {
     try {
       setArchiveLoading(true);
 
-      const response = await employeeApi.update(archivingEmployee.id, {
-        status: 'archived',
-        archiveReason: archiveReason,
-        archivedAt: new Date().toISOString()
+      // Use the same API as employee details page
+      const response = await fetch(`/api/employees/${archivingEmployee.id}?action=archive`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ reason: archiveReason }),
       });
 
-      if (response.success) {
+      const result = await response.json();
+
+      if (result.success) {
         toast({
           title: "تم الأرشفة بنجاح",
           description: `تم أرشفة الموظف ${archivingEmployee.name} بنجاح`,
@@ -438,7 +633,7 @@ export default function AllEmployeesPage() {
       } else {
         toast({
           title: "خطأ في الأرشفة",
-          description: response.error || "حدث خطأ أثناء أرشفة الموظف",
+          description: result.error || "حدث خطأ أثناء أرشفة الموظف",
           variant: "destructive",
         });
       }
@@ -451,6 +646,41 @@ export default function AllEmployeesPage() {
       });
     } finally {
       setArchiveLoading(false);
+    }
+  };
+
+  const handleConfirmDelete = async () => {
+    if (!deletingEmployee) return;
+
+    try {
+      setDeleteLoading(true);
+
+      const response = await employeeApi.delete(deletingEmployee.id);
+
+      if (response.success) {
+        toast({
+          title: "تم حذف الموظف",
+          description: `تم حذف ${deletingEmployee.name} نهائياً من النظام`,
+        });
+        setDeleteDialog(false);
+        setDeletingEmployee(null);
+        refetchEmployees(); // Refresh the employee list
+      } else {
+        toast({
+          title: "خطأ في الحذف",
+          description: response.error || "حدث خطأ أثناء حذف الموظف",
+          variant: "destructive",
+        });
+      }
+    } catch (error) {
+      console.error('Error deleting employee:', error);
+      toast({
+        title: "خطأ في الحذف",
+        description: "حدث خطأ أثناء حذف الموظف",
+        variant: "destructive",
+      });
+    } finally {
+      setDeleteLoading(false);
     }
   };
 
@@ -472,11 +702,11 @@ export default function AllEmployeesPage() {
       // Handle document status (expiring_soon/expired)
       if (statusFilter === 'expiring_soon' || statusFilter === 'expired') {
         const statuses = [
-          getDocumentStatus(emp.iqamaExpiry),
-          getDocumentStatus(emp.healthInsuranceExpiry),
-          getDocumentStatus(emp.workPermitExpiry),
-          getDocumentStatus(emp.healthCertExpiry),
-          getDocumentStatus(emp.contractExpiry),
+          getStatus(emp.iqamaExpiry || ''),
+          getStatus(emp.healthInsuranceExpiry || ''),
+          getStatus(emp.workPermitExpiry || ''),
+          getStatus(emp.healthCertExpiry || ''),
+          getStatus(emp.contractExpiry || ''),
         ];
         return statuses.includes(statusFilter as any);
       }
@@ -631,16 +861,8 @@ export default function AllEmployeesPage() {
                               }}
                             >
                               <Eye className="ml-2 h-4 w-4" />
-                              عرض الملف
+                              عرض التفاصيل
                             </Link>
-                          </Button>
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => navigateToEmployee(emp.id)}
-                          >
-                            <Eye className="ml-2 h-4 w-4" />
-                            تفاصيل
                           </Button>
                           <DropdownMenu>
                             <DropdownMenuTrigger asChild>
@@ -649,19 +871,6 @@ export default function AllEmployeesPage() {
                               </Button>
                             </DropdownMenuTrigger>
                             <DropdownMenuContent align="end">
-                               <DropdownMenuItem asChild>
-                                 <Link
-                                   href={`/employees/${emp.id}`}
-                                   prefetch={false}
-                                   onClick={(e) => {
-                                     console.log('Dropdown link clicked for employee:', emp.id);
-                                     console.log('Navigating to:', `/employees/${emp.id}`);
-                                   }}
-                                 >
-                                   <Eye className="ml-2 h-4 w-4" />
-                                   عرض التفاصيل
-                                 </Link>
-                               </DropdownMenuItem>
                               <DropdownMenuItem onClick={() => handleEditEmployee(emp)}>
                                 <Edit className="ml-2 h-4 w-4" />
                                 تعديل
@@ -669,6 +878,13 @@ export default function AllEmployeesPage() {
                               <DropdownMenuItem onClick={() => handleArchiveEmployee(emp)}>
                                 <Archive className="ml-2 h-4 w-4" />
                                 أرشفة
+                              </DropdownMenuItem>
+                              <DropdownMenuItem
+                                onClick={() => handleDeleteEmployee(emp)}
+                                className="text-red-600 focus:text-red-600"
+                              >
+                                <Trash2 className="ml-2 h-4 w-4" />
+                                حذف نهائي
                               </DropdownMenuItem>
                             </DropdownMenuContent>
                           </DropdownMenu>
@@ -698,61 +914,154 @@ export default function AllEmployeesPage() {
               قم بتعديل البيانات المطلوبة للموظف {editingEmployee?.name}
             </DialogDescription>
           </DialogHeader>
-          <div className="grid gap-4 py-4">
-            <div className="space-y-2">
-              <Label htmlFor="name">الاسم</Label>
-              <Input
-                id="name"
-                value={editForm.name}
-                onChange={(e) => setEditForm(prev => ({ ...prev, name: e.target.value }))}
-                placeholder="اسم الموظف..."
-              />
+          <div className="grid gap-4 py-4 max-h-[60vh] overflow-y-auto">
+            {/* الصف الأول: الاسم والجنسية */}
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="edit-name" className="flex items-center gap-1">
+                  الاسم <span className="text-red-500">*</span>
+                </Label>
+                <Input
+                  id="edit-name"
+                  value={editForm.name}
+                  onChange={(e) => setEditForm(prev => ({ ...prev, name: e.target.value }))}
+                  placeholder="اسم الموظف الكامل..."
+                  required
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="edit-nationality" className="flex items-center gap-1">
+                  الجنسية <span className="text-red-500">*</span>
+                </Label>
+                <Input
+                  id="edit-nationality"
+                  value={editForm.nationality}
+                  onChange={(e) => setEditForm(prev => ({ ...prev, nationality: e.target.value }))}
+                  placeholder="مثال: سعودي، مصري، يمني..."
+                  required
+                />
+              </div>
             </div>
-            <div className="space-y-2">
-              <Label htmlFor="phone">رقم الهاتف</Label>
-              <Input
-                id="phone"
-                value={editForm.phone}
-                onChange={(e) => setEditForm(prev => ({ ...prev, phone: e.target.value }))}
-                placeholder="رقم الهاتف..."
-              />
+
+            {/* الصف الثاني: الجوال والبريد الإلكتروني */}
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="edit-phone" className="flex items-center gap-1">
+                  رقم الجوال <span className="text-red-500">*</span>
+                </Label>
+                <Input
+                  id="edit-phone"
+                  value={editForm.phone}
+                  onChange={(e) => setEditForm(prev => ({ ...prev, phone: e.target.value }))}
+                  placeholder="05xxxxxxxx"
+                  required
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="edit-email">البريد الإلكتروني</Label>
+                <Input
+                  id="edit-email"
+                  type="email"
+                  value={editForm.email}
+                  onChange={(e) => setEditForm(prev => ({ ...prev, email: e.target.value }))}
+                  placeholder="example@company.com"
+                />
+              </div>
             </div>
-            <div className="space-y-2">
-              <Label htmlFor="position">المنصب</Label>
-              <Input
-                id="position"
-                value={editForm.position}
-                onChange={(e) => setEditForm(prev => ({ ...prev, position: e.target.value }))}
-                placeholder="منصب الموظف..."
-              />
+
+            {/* الصف الثالث: المنصب والراتب */}
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="edit-position">المنصب</Label>
+                <Input
+                  id="edit-position"
+                  value={editForm.position}
+                  onChange={(e) => setEditForm(prev => ({ ...prev, position: e.target.value }))}
+                  placeholder="منصب الموظف..."
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="edit-salary">الراتب (ريال سعودي)</Label>
+                <Input
+                  id="edit-salary"
+                  type="number"
+                  value={editForm.salary}
+                  onChange={(e) => setEditForm(prev => ({ ...prev, salary: e.target.value }))}
+                  placeholder="0"
+                  min="0"
+                  step="100"
+                />
+              </div>
             </div>
-            <div className="space-y-2">
-              <Label htmlFor="salary">الراتب</Label>
-              <Input
-                id="salary"
-                type="number"
-                value={editForm.salary}
-                onChange={(e) => setEditForm(prev => ({ ...prev, salary: e.target.value }))}
-                placeholder="راتب الموظف..."
-              />
+
+            {/* الصف الرابع: المؤسسة وتاريخ التوظيف */}
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="edit-institution">المؤسسة / الكفيل</Label>
+                <Select
+                  value={editForm.institutionId}
+                  onValueChange={(value) => setEditForm(prev => ({ ...prev, institutionId: value }))}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="اختر المؤسسة" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="unsponsored">غير مكفول</SelectItem>
+                    {institutions.filter(inst => inst.id !== 'unsponsored').map((institution) => (
+                      <SelectItem key={institution.id} value={institution.id}>
+                        {institution.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="edit-hire-date">تاريخ التوظيف</Label>
+                <Input
+                  id="edit-hire-date"
+                  type="date"
+                  value={editForm.hireDate}
+                  onChange={(e) => setEditForm(prev => ({ ...prev, hireDate: e.target.value }))}
+                />
+              </div>
             </div>
+
+            {/* صورة الموظف */}
             <div className="space-y-2">
-              <Label htmlFor="institution">المؤسسة</Label>
-              <Select
-                value={editForm.institutionId}
-                onValueChange={(value) => setEditForm(prev => ({ ...prev, institutionId: value }))}
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="اختر المؤسسة..." />
-                </SelectTrigger>
-                <SelectContent>
-                  {institutions.map((inst) => (
-                    <SelectItem key={inst.id} value={inst.id}>
-                      {inst.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <Label htmlFor="edit-photoUrl">صورة الموظف (اختياري)</Label>
+              <div className="flex gap-2">
+                <Input
+                  id="edit-photoUrl"
+                  type="text"
+                  value={editForm.photoUrl}
+                  onChange={(e) => setEditForm(prev => ({ ...prev, photoUrl: e.target.value }))}
+                  placeholder="رابط الصورة أو اتركه فارغاً"
+                />
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={handleEditPhotoUpload}
+                  disabled={editPhotoUploading}
+                >
+                  {editPhotoUploading ? "جاري الرفع..." : "رفع صورة"}
+                </Button>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                يمكنك إدخال رابط الصورة أو رفع صورة من جهازك
+              </p>
+              {editForm.photoUrl && (
+                <div className="mt-2">
+                  <img
+                    src={editForm.photoUrl}
+                    alt="معاينة صورة الموظف"
+                    className="w-20 h-20 object-cover rounded-lg border"
+                    onError={(e) => {
+                      (e.target as HTMLImageElement).style.display = 'none';
+                    }}
+                  />
+                </div>
+              )}
             </div>
           </div>
           <DialogFooter>
@@ -825,6 +1134,41 @@ export default function AllEmployeesPage() {
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
             >
               {archiveLoading ? "جاري الأرشفة..." : "أرشفة"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Delete Employee Dialog */}
+      <Dialog open={deleteDialog} onOpenChange={setDeleteDialog}>
+        <DialogContent className="sm:max-w-[500px]">
+          <DialogHeader>
+            <DialogTitle className="text-red-600">حذف الموظف نهائياً</DialogTitle>
+            <DialogDescription>
+              هل أنت متأكد من حذف الموظف <strong>{deletingEmployee?.name}</strong> نهائياً؟
+              <br />
+              <span className="text-red-600 font-semibold">تحذير: هذا الإجراء لا يمكن التراجع عنه!</span>
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => {
+                setDeleteDialog(false);
+                setDeletingEmployee(null);
+              }}
+              disabled={deleteLoading}
+            >
+              إلغاء
+            </Button>
+            <Button
+              type="button"
+              onClick={handleConfirmDelete}
+              disabled={deleteLoading}
+              className="bg-red-600 text-white hover:bg-red-700"
+            >
+              {deleteLoading ? "جاري الحذف..." : "حذف نهائي"}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -1033,18 +1377,36 @@ export default function AllEmployeesPage() {
                   <div className="flex gap-2">
                     <Input
                       id="photoUrl"
-                      type="url"
+                      type="text"
                       value={addForm.photoUrl}
                       onChange={(e) => setAddForm(prev => ({ ...prev, photoUrl: e.target.value }))}
                       placeholder="رابط الصورة أو اتركه فارغاً"
                     />
-                    <Button type="button" variant="outline" size="sm">
-                      رفع صورة
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={handlePhotoUpload}
+                      disabled={photoUploading}
+                    >
+                      {photoUploading ? "جاري الرفع..." : "رفع صورة"}
                     </Button>
                   </div>
                   <p className="text-xs text-muted-foreground">
                     يمكنك إدخال رابط الصورة أو رفع صورة من جهازك
                   </p>
+                  {addForm.photoUrl && (
+                    <div className="mt-2">
+                      <img
+                        src={addForm.photoUrl}
+                        alt="معاينة صورة الموظف"
+                        className="w-20 h-20 object-cover rounded-lg border"
+                        onError={(e) => {
+                          (e.target as HTMLImageElement).style.display = 'none';
+                        }}
+                      />
+                    </div>
+                  )}
                 </div>
               </div>
             </div>

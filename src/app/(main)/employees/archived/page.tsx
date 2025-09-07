@@ -27,6 +27,7 @@ import {
 } from '@/components/ui/select';
 import { useEmployees, useInstitutions } from '@/hooks/useHRData';
 import { useToast } from '@/hooks/use-toast';
+import { useDebouncedSearch } from '@/hooks/useDebounce';
 import { employeeApi } from '@/lib/api-client';
 import { FileUp, Search, Filter } from 'lucide-react';
 import Link from 'next/link';
@@ -34,14 +35,16 @@ import * as React from 'react';
 
 export default function ArchivedEmployeesPage() {
   const { toast } = useToast();
-  const [searchTerm, setSearchTerm] = React.useState('');
+
+  // استخدام debounced search لتجنب استدعاء API مع كل حرف
+  const { searchTerm, debouncedSearchTerm, setSearchTerm } = useDebouncedSearch('', 500);
   const [institutionFilter, setInstitutionFilter] = React.useState('all');
   const [archiveReasonFilter, setArchiveReasonFilter] = React.useState('all');
 
-  // Prepare filters for API call
+  // Prepare filters for API call - استخدام debouncedSearchTerm بدلاً من searchTerm
   const filters = React.useMemo(() => {
     const result: any = { status: 'archived' };
-    if (searchTerm) result.search = searchTerm;
+    if (debouncedSearchTerm) result.search = debouncedSearchTerm;
     if (institutionFilter !== 'all') {
       if (institutionFilter === 'none') {
         result.institutionId = 'none';
@@ -50,7 +53,7 @@ export default function ArchivedEmployeesPage() {
       }
     }
     return result;
-  }, [searchTerm, institutionFilter]);
+  }, [debouncedSearchTerm, institutionFilter]);
 
   // Fetch data from APIs
   const {
@@ -70,8 +73,16 @@ export default function ArchivedEmployeesPage() {
   }, [allEmployees, archiveReasonFilter]);
 
   const reasonTextMap = {
-    terminated: 'إنهاء خدمات',
-    final_exit: 'خروج نهائي',
+    resignation: 'استقالة',
+    termination: 'إنهاء خدمة',
+    retirement: 'تقاعد',
+    transfer: 'نقل لمؤسسة أخرى',
+    contract_end: 'انتهاء العقد',
+    medical_leave: 'إجازة مرضية طويلة',
+    disciplinary: 'أسباب تأديبية',
+    other: 'أخرى',
+    terminated: 'إنهاء خدمات', // للتوافق مع البيانات القديمة
+    final_exit: 'خروج نهائي', // للتوافق مع البيانات القديمة
   };
 
   // Handle employee reactivation
@@ -173,6 +184,14 @@ export default function ArchivedEmployeesPage() {
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">جميع الأسباب</SelectItem>
+                <SelectItem value="resignation">استقالة</SelectItem>
+                <SelectItem value="termination">إنهاء خدمة</SelectItem>
+                <SelectItem value="retirement">تقاعد</SelectItem>
+                <SelectItem value="transfer">نقل لمؤسسة أخرى</SelectItem>
+                <SelectItem value="contract_end">انتهاء العقد</SelectItem>
+                <SelectItem value="medical_leave">إجازة مرضية طويلة</SelectItem>
+                <SelectItem value="disciplinary">أسباب تأديبية</SelectItem>
+                <SelectItem value="other">أخرى</SelectItem>
                 <SelectItem value="terminated">إنهاء خدمات</SelectItem>
                 <SelectItem value="final_exit">خروج نهائي</SelectItem>
               </SelectContent>

@@ -27,6 +27,7 @@ export interface Employee {
   archiveReason?: 'resignation' | 'termination' | 'retirement' | 'transfer' | 'contract_end' | 'medical_leave' | 'disciplinary' | 'other' | null;
   archivedAt?: string;
   archiveDate?: string;
+  hireDate?: string;
   createdAt?: string;
   updatedAt?: string;
 }
@@ -91,13 +92,14 @@ export class EmployeeModel {
         e.branch_id as branchId, e.photo_url as photoUrl, e.iqama_number as iqamaNumber,
         e.iqama_expiry as iqamaExpiry, e.work_permit_expiry as workPermitExpiry,
         e.contract_expiry as contractExpiry, e.insurance_expiry as healthInsuranceExpiry,
-        e.health_cert_expiry as healthCertExpiry, e.institution_id as institutionId, e.salary, e.status,
+        e.health_cert_expiry as healthCertExpiry, e.institution_id as institutionId, e.salary, e.hire_date as hireDate, e.status,
         e.unsponsored_reason as unsponsoredReason, e.last_status_update as lastStatusUpdate,
         e.archive_reason as archiveReason, e.archived_at as archivedAt, e.archive_date as archiveDate,
         e.created_at as createdAt, e.updated_at as updatedAt,
-        i.name as institutionName
+        i.name as institutionName, b.name as branchName
       FROM employees e
       LEFT JOIN institutions i ON e.institution_id = i.id
+      LEFT JOIN branches b ON e.branch_id = b.id
       WHERE e.id = ?
     `;
 
@@ -120,13 +122,14 @@ export class EmployeeModel {
         e.branch_id as branchId, e.photo_url as photoUrl, e.iqama_number as iqamaNumber,
         e.iqama_expiry as iqamaExpiry, e.work_permit_expiry as workPermitExpiry,
         e.contract_expiry as contractExpiry, e.insurance_expiry as healthInsuranceExpiry,
-        e.health_cert_expiry as healthCertExpiry, e.institution_id as institutionId, e.salary, e.status,
+        e.health_cert_expiry as healthCertExpiry, e.institution_id as institutionId, e.salary, e.hire_date as hireDate, e.status,
         e.unsponsored_reason as unsponsoredReason, e.last_status_update as lastStatusUpdate,
         e.archive_reason as archiveReason, e.archived_at as archivedAt, e.archive_date as archiveDate,
         e.created_at as createdAt, e.updated_at as updatedAt,
-        i.name as institutionName
+        i.name as institutionName, b.name as branchName
       FROM employees e
       LEFT JOIN institutions i ON e.institution_id = i.id
+      LEFT JOIN branches b ON e.branch_id = b.id
       WHERE 1=1
     `;
 
@@ -168,6 +171,30 @@ export class EmployeeModel {
     return await executeQuery(query, values);
   }
 
+  // Get employees by institution ID
+  static async getByInstitutionId(institutionId: string): Promise<Employee[]> {
+    const query = `
+      SELECT
+        e.id, e.name, e.mobile, e.email, e.file_number as fileNumber, e.nationality, e.position,
+        e.branch_id as branchId, e.photo_url as photoUrl, e.iqama_number as iqamaNumber,
+        e.iqama_expiry as iqamaExpiry, e.work_permit_expiry as workPermitExpiry,
+        e.contract_expiry as contractExpiry, e.insurance_expiry as healthInsuranceExpiry,
+        e.health_cert_expiry as healthCertExpiry, e.institution_id as institutionId, e.salary, e.hire_date as hireDate, e.status,
+        e.unsponsored_reason as unsponsoredReason, e.archive_reason as archiveReason,
+        e.archived_at as archivedAt, e.archive_date as archiveDate,
+        e.created_at as createdAt, e.updated_at as updatedAt,
+        i.name as institutionName, b.name as branchName
+      FROM employees e
+      LEFT JOIN institutions i ON e.institution_id = i.id
+      LEFT JOIN branches b ON e.branch_id = b.id
+      WHERE e.institution_id = ? AND e.status = 'active'
+      ORDER BY e.name ASC
+    `;
+
+    const results = await executeQuery(query, [institutionId]);
+    return results as Employee[];
+  }
+
   // Find unsponsored employees (not linked to any institution)
   static async findUnsponsored(): Promise<Employee[]> {
     const query = `
@@ -176,11 +203,13 @@ export class EmployeeModel {
         e.branch_id as branchId, e.photo_url as photoUrl, e.iqama_number as iqamaNumber,
         e.iqama_expiry as iqamaExpiry, e.work_permit_expiry as workPermitExpiry,
         e.contract_expiry as contractExpiry, e.insurance_expiry as healthInsuranceExpiry,
-        e.institution_id as institutionId, e.salary, e.status,
+        e.institution_id as institutionId, e.salary, e.hire_date as hireDate, e.status,
         e.unsponsored_reason as unsponsoredReason, e.last_status_update as lastStatusUpdate,
         e.archive_reason as archiveReason, e.archived_at as archivedAt, e.archive_date as archiveDate,
-        e.created_at as createdAt, e.updated_at as updatedAt
+        e.created_at as createdAt, e.updated_at as updatedAt,
+        b.name as branchName
       FROM employees e
+      LEFT JOIN branches b ON e.branch_id = b.id
       WHERE e.institution_id IS NULL AND e.status = 'active'
       ORDER BY e.created_at DESC
     `;
@@ -204,6 +233,18 @@ export class EmployeeModel {
     if (data.mobile !== undefined) {
       updateFields.push('mobile = ?');
       values.push(data.mobile);
+    }
+    if (data.email !== undefined) {
+      updateFields.push('email = ?');
+      values.push(data.email);
+    }
+    if (data.nationality !== undefined) {
+      updateFields.push('nationality = ?');
+      values.push(data.nationality);
+    }
+    if (data.position !== undefined) {
+      updateFields.push('position = ?');
+      values.push(data.position);
     }
     if (data.iqamaNumber !== undefined) {
       updateFields.push('iqama_number = ?');
@@ -268,6 +309,10 @@ export class EmployeeModel {
       updateFields.push('archive_date = ?');
       values.push(formatDateForMySQL(data.archiveDate));
     }
+    if (data.hireDate !== undefined) {
+      updateFields.push('hire_date = ?');
+      values.push(formatDateForMySQL(data.hireDate));
+    }
 
     if (updateFields.length === 0) {
       return await this.findById(id);
@@ -283,7 +328,7 @@ export class EmployeeModel {
   }
 
   // Archive employee (soft delete)
-  static async archive(id: string, reason: 'terminated' | 'final_exit'): Promise<boolean> {
+  static async archive(id: string, reason: 'resignation' | 'termination' | 'retirement' | 'transfer' | 'contract_end' | 'medical_leave' | 'disciplinary' | 'other' | 'terminated' | 'final_exit'): Promise<boolean> {
     const query = `
       UPDATE employees
       SET status = 'archived',
@@ -294,6 +339,17 @@ export class EmployeeModel {
       WHERE id = ?
     `;
     const result = await executeQuery(query, [reason, id]);
+    return result.affectedRows > 0;
+  }
+
+  // Delete employee permanently (hard delete)
+  static async delete(id: string): Promise<boolean> {
+    // First, delete related documents
+    await executeQuery('DELETE FROM employee_documents WHERE employee_id = ?', [id]);
+
+    // Then delete the employee
+    const query = 'DELETE FROM employees WHERE id = ?';
+    const result = await executeQuery(query, [id]);
     return result.affectedRows > 0;
   }
 
@@ -316,16 +372,17 @@ export class EmployeeModel {
         e.branch_id as branchId, e.photo_url as photoUrl, e.iqama_number as iqamaNumber,
         e.iqama_expiry as iqamaExpiry, e.work_permit_expiry as workPermitExpiry,
         e.contract_expiry as contractExpiry, e.insurance_expiry as healthInsuranceExpiry,
-        e.health_cert_expiry as healthCertExpiry, e.institution_id as institutionId, e.salary, e.status,
-        i.name as institutionName
+        e.health_cert_expiry as healthCertExpiry, e.institution_id as institutionId, e.salary, e.hire_date as hireDate, e.status,
+        i.name as institutionName, b.name as branchName
       FROM employees e
       LEFT JOIN institutions i ON e.institution_id = i.id
+      LEFT JOIN branches b ON e.branch_id = b.id
       WHERE e.status = 'active'
       AND (
         (e.iqama_expiry IS NOT NULL AND e.iqama_expiry <= DATE_ADD(CURDATE(), INTERVAL ? DAY))
         OR (e.work_permit_expiry IS NOT NULL AND e.work_permit_expiry <= DATE_ADD(CURDATE(), INTERVAL ? DAY))
         OR (e.contract_expiry IS NOT NULL AND e.contract_expiry <= DATE_ADD(CURDATE(), INTERVAL ? DAY))
-        OR (e.health_insurance_expiry IS NOT NULL AND e.health_insurance_expiry <= DATE_ADD(CURDATE(), INTERVAL ? DAY))
+        OR (e.insurance_expiry IS NOT NULL AND e.insurance_expiry <= DATE_ADD(CURDATE(), INTERVAL ? DAY))
         OR (e.health_cert_expiry IS NOT NULL AND e.health_cert_expiry <= DATE_ADD(CURDATE(), INTERVAL ? DAY))
       )
       ORDER BY
@@ -333,7 +390,7 @@ export class EmployeeModel {
           WHEN e.iqama_expiry IS NOT NULL AND e.iqama_expiry <= DATE_ADD(CURDATE(), INTERVAL ? DAY) THEN e.iqama_expiry
           WHEN e.work_permit_expiry IS NOT NULL AND e.work_permit_expiry <= DATE_ADD(CURDATE(), INTERVAL ? DAY) THEN e.work_permit_expiry
           WHEN e.contract_expiry IS NOT NULL AND e.contract_expiry <= DATE_ADD(CURDATE(), INTERVAL ? DAY) THEN e.contract_expiry
-          WHEN e.health_insurance_expiry IS NOT NULL AND e.health_insurance_expiry <= DATE_ADD(CURDATE(), INTERVAL ? DAY) THEN e.health_insurance_expiry
+          WHEN e.insurance_expiry IS NOT NULL AND e.insurance_expiry <= DATE_ADD(CURDATE(), INTERVAL ? DAY) THEN e.insurance_expiry
           WHEN e.health_cert_expiry IS NOT NULL AND e.health_cert_expiry <= DATE_ADD(CURDATE(), INTERVAL ? DAY) THEN e.health_cert_expiry
         END ASC
     `;

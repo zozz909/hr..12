@@ -1,4 +1,6 @@
 import mysql from 'serverless-mysql';
+import { cacheHelpers } from '@/lib/performance/cache';
+import { PerformanceMonitor } from '@/lib/monitoring/error-handler';
 
 export const db = mysql({
   config: {
@@ -8,24 +10,76 @@ export const db = mysql({
     database: process.env.MYSQL_DATABASE || 'hr_system',
     port: parseInt(process.env.MYSQL_PORT || '3306'),
     charset: 'utf8mb4',
-    timezone: 'UTC'
+    // إزالة timezone لتجنب مشاكل MariaDB
+    // timezone: 'UTC'
   },
   // Set a longer timeout for serverless environments
-  connectTimeout: 10000,
-  acquireTimeout: 10000,
-  timeout: 10000,
 });
 
-export async function executeQuery(query: string, values: any[] = []): Promise<any> {
+export async function executeQuery(query: string, values: any[] = [], useCache = false): Promise<any> {
+  const endTimer = PerformanceMonitor.startTimer('database_query');
+
   try {
+    // Check cache for SELECT queries if caching is enabled
+    if (useCache && query.trim().toLowerCase().startsWith('select')) {
+      const cacheKey = cacheHelpers.generateDbCacheKey('query', query, values);
+      const cached = cacheHelpers.getCachedDbQuery(query, values);
+
+      if (cached !== null) {
+        endTimer();
+        return cached;
+      }
+    }
+
     const results = await db.query(query, values);
     await db.end();
+
+    // Cache SELECT query results if caching is enabled
+    if (useCache && query.trim().toLowerCase().startsWith('select')) {
+      cacheHelpers.cacheDbQuery(query, values, results);
+    }
+
+    endTimer();
     return results;
   } catch (error) {
+    endTimer();
     console.error('Database Query Error:', error);
     console.error('Query:', query);
     console.error('Values:', values);
-    throw new Error('An error occurred while accessing the database.');
+
+    // إرسال الخطأ الأصلي للمطور مع تفاصيل أكثر
+    if (error instanceof Error) {
+      throw new Error(`Database Error: ${error.message}`);
+    } else {
+      throw new Error('An error occurred while accessing the database.');
+    }
+  }
+}
+
+// Optimized query function with automatic caching for read operations
+export async function executeQueryCached(query: string, values: any[] = [], ttl = 2 * 60 * 1000): Promise<any> {
+  return executeQuery(query, values, true);
+}
+
+// Batch query execution for better performance
+export async function executeBatchQueries(queries: Array<{ query: string; values?: any[] }>): Promise<any[]> {
+  const endTimer = PerformanceMonitor.startTimer('database_batch_query');
+
+  try {
+    const results = [];
+
+    for (const { query, values = [] } of queries) {
+      const result = await db.query(query, values);
+      results.push(result);
+    }
+
+    await db.end();
+    endTimer();
+    return results;
+  } catch (error) {
+    endTimer();
+    console.error('Batch Query Error:', error);
+    throw new Error('An error occurred while executing batch queries.');
   }
 }
 

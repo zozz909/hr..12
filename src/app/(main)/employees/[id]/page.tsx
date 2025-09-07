@@ -4,6 +4,7 @@ import { notFound } from 'next/navigation';
 import { employeeApi, documentApi } from '@/lib/api-client';
 import { Employee, EmployeeDocument } from '@/types';
 import Image from 'next/image';
+import { EmployeePhotoLarge } from '@/components/ui/employee-photo';
 import * as React from 'react';
 import {
   Card,
@@ -67,6 +68,7 @@ import {
 import { Input } from '@/components/ui/input';
 import { cn } from '@/lib/utils';
 import { CalendarOff } from 'lucide-react';
+import { useInstitutions } from '@/hooks/useHRData';
 
 // Helper function to calculate days remaining
 function getDaysRemaining(dateString: string): number {
@@ -135,6 +137,7 @@ const StatusCard = ({ title, icon: Icon, expiryDate, idNumber, onRenew }: Status
 export default function EmployeeProfilePage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = React.use(params);
   const { toast } = useToast();
+  const { data: institutions = [] } = useInstitutions();
   const [employee, setEmployee] = React.useState<Employee | null>(null);
   const [loading, setLoading] = React.useState(true);
   const [renewLoading, setRenewLoading] = React.useState<string | null>(null);
@@ -167,10 +170,15 @@ export default function EmployeeProfilePage({ params }: { params: Promise<{ id: 
   const [editForm, setEditForm] = React.useState({
     name: '',
     phone: '',
+    email: '',
+    nationality: '',
     position: '',
     salary: '',
-    institutionId: ''
+    institutionId: '',
+    hireDate: '',
+    photoUrl: ''
   });
+  const [editPhotoUploading, setEditPhotoUploading] = React.useState(false);
 
   // Archive employee state
   const [archiveDialog, setArchiveDialog] = React.useState(false);
@@ -469,16 +477,92 @@ export default function EmployeeProfilePage({ params }: { params: Promise<{ id: 
     }
   };
 
+  // Handle photo upload for edit employee form
+  const handleEditPhotoUpload = async () => {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = 'image/*';
+    input.onchange = async (e) => {
+      const file = (e.target as HTMLInputElement).files?.[0];
+      if (!file) return;
+
+      // Validate file size (max 5MB for images)
+      const maxSize = 5 * 1024 * 1024; // 5MB
+      if (file.size > maxSize) {
+        toast({
+          variant: "destructive",
+          title: "حجم الملف كبير جداً",
+          description: "يجب أن يكون حجم الصورة أقل من 5 ميجابايت",
+        });
+        return;
+      }
+
+      // Validate file type
+      if (!file.type.startsWith('image/')) {
+        toast({
+          variant: "destructive",
+          title: "نوع ملف غير صحيح",
+          description: "يرجى اختيار ملف صورة صالح",
+        });
+        return;
+      }
+
+      try {
+        setEditPhotoUploading(true);
+
+        const formData = new FormData();
+        formData.append('file', file);
+        formData.append('entityType', 'employee');
+        formData.append('entityId', employee?.id || 'temp');
+
+        const response = await fetch('/api/upload', {
+          method: 'POST',
+          body: formData,
+        });
+
+        const result = await response.json();
+
+        if (result.success) {
+          // Ensure the URL is complete
+          const fullUrl = result.data.fileUrl.startsWith('http')
+            ? result.data.fileUrl
+            : `${window.location.origin}${result.data.fileUrl}`;
+
+          setEditForm(prev => ({ ...prev, photoUrl: fullUrl }));
+          toast({
+            title: "تم رفع الصورة بنجاح",
+            description: "تم رفع صورة الموظف بنجاح",
+          });
+        } else {
+          throw new Error(result.error || 'فشل في رفع الصورة');
+        }
+      } catch (error) {
+        toast({
+          variant: "destructive",
+          title: "خطأ في رفع الصورة",
+          description: error instanceof Error ? error.message : "حدث خطأ أثناء رفع الصورة",
+        });
+      } finally {
+        setEditPhotoUploading(false);
+      }
+    };
+    input.click();
+  };
+
   // Handle edit employee
   const handleEditEmployee = () => {
     if (!employee) return;
 
     setEditForm({
       name: employee.name || '',
-      phone: employee.phone || '',
+      phone: employee.mobile || '',
+      email: employee.email || '',
+      nationality: employee.nationality || '',
       position: employee.position || '',
       salary: employee.salary?.toString() || '',
-      institutionId: employee.institutionId || ''
+      institutionId: employee.institutionId || 'unsponsored',
+      hireDate: employee.hireDate || '',
+      photoUrl: employee.photoUrl || ''
     });
     setEditDialog(true);
   };
@@ -491,10 +575,17 @@ export default function EmployeeProfilePage({ params }: { params: Promise<{ id: 
 
       const updateData: any = {};
       if (editForm.name !== employee.name) updateData.name = editForm.name;
-      if (editForm.phone !== employee.phone) updateData.phone = editForm.phone;
+      if (editForm.phone !== employee.mobile) updateData.mobile = editForm.phone;
+      if (editForm.email !== employee.email) updateData.email = editForm.email;
+      if (editForm.nationality !== employee.nationality) updateData.nationality = editForm.nationality;
       if (editForm.position !== employee.position) updateData.position = editForm.position;
       if (editForm.salary !== employee.salary?.toString()) updateData.salary = parseFloat(editForm.salary) || 0;
-      if (editForm.institutionId !== employee.institutionId) updateData.institutionId = editForm.institutionId;
+      const currentInstitutionId = employee.institutionId || 'unsponsored';
+      if (editForm.institutionId !== currentInstitutionId) {
+        updateData.institutionId = editForm.institutionId === 'unsponsored' ? null : editForm.institutionId;
+      }
+      if (editForm.hireDate !== employee.hireDate) updateData.hireDate = editForm.hireDate;
+      if (editForm.photoUrl !== (employee.photoUrl || '')) updateData.photoUrl = editForm.photoUrl;
 
       if (Object.keys(updateData).length === 0) {
         toast({
@@ -557,8 +648,8 @@ export default function EmployeeProfilePage({ params }: { params: Promise<{ id: 
       setArchiveLoading(true);
 
       // Use the dedicated archive API
-      const response = await fetch(`/api/employees/${employee.id}`, {
-        method: 'DELETE',
+      const response = await fetch(`/api/employees/${employee.id}?action=archive`, {
+        method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
         },
@@ -580,7 +671,9 @@ export default function EmployeeProfilePage({ params }: { params: Promise<{ id: 
         if (id) {
           const updatedEmployee = await employeeApi.getById(id);
           if (updatedEmployee.success) {
-            setEmployee(updatedEmployee.data);
+            if (updatedEmployee.data) {
+              setEmployee(updatedEmployee.data);
+            }
           }
         }
       } else {
@@ -667,20 +760,10 @@ export default function EmployeeProfilePage({ params }: { params: Promise<{ id: 
       {/* Header */}
       <div className="flex items-start justify-between">
         <div className="flex items-start gap-4">
-          <div className="relative h-20 w-20 rounded-full overflow-hidden bg-muted">
-            {employee.photoUrl ? (
-              <Image
-                src={employee.photoUrl}
-                alt={employee.name}
-                fill
-                className="object-cover"
-              />
-            ) : (
-              <div className="flex h-full w-full items-center justify-center">
-                <User className="h-8 w-8 text-muted-foreground" />
-              </div>
-            )}
-          </div>
+          <EmployeePhotoLarge
+            photoUrl={employee.photoUrl}
+            name={employee.name}
+          />
           <div>
             <h1 className="text-3xl font-bold">{employee.name}</h1>
             <div className="flex items-center gap-4 mt-2 text-muted-foreground">
@@ -1060,43 +1143,154 @@ export default function EmployeeProfilePage({ params }: { params: Promise<{ id: 
               قم بتعديل البيانات المطلوبة للموظف {employee?.name}
             </DialogDescription>
           </DialogHeader>
-          <div className="grid gap-4 py-4">
-            <div className="space-y-2">
-              <Label htmlFor="edit-name">الاسم</Label>
-              <Input
-                id="edit-name"
-                value={editForm.name}
-                onChange={(e) => setEditForm(prev => ({ ...prev, name: e.target.value }))}
-                placeholder="اسم الموظف..."
-              />
+          <div className="grid gap-4 py-4 max-h-[60vh] overflow-y-auto">
+            {/* الصف الأول: الاسم والجنسية */}
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="edit-name" className="flex items-center gap-1">
+                  الاسم <span className="text-red-500">*</span>
+                </Label>
+                <Input
+                  id="edit-name"
+                  value={editForm.name}
+                  onChange={(e) => setEditForm(prev => ({ ...prev, name: e.target.value }))}
+                  placeholder="اسم الموظف الكامل..."
+                  required
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="edit-nationality" className="flex items-center gap-1">
+                  الجنسية <span className="text-red-500">*</span>
+                </Label>
+                <Input
+                  id="edit-nationality"
+                  value={editForm.nationality}
+                  onChange={(e) => setEditForm(prev => ({ ...prev, nationality: e.target.value }))}
+                  placeholder="مثال: سعودي، مصري، يمني..."
+                  required
+                />
+              </div>
             </div>
-            <div className="space-y-2">
-              <Label htmlFor="edit-phone">رقم الهاتف</Label>
-              <Input
-                id="edit-phone"
-                value={editForm.phone}
-                onChange={(e) => setEditForm(prev => ({ ...prev, phone: e.target.value }))}
-                placeholder="رقم الهاتف..."
-              />
+
+            {/* الصف الثاني: الجوال والبريد الإلكتروني */}
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="edit-phone" className="flex items-center gap-1">
+                  رقم الجوال <span className="text-red-500">*</span>
+                </Label>
+                <Input
+                  id="edit-phone"
+                  value={editForm.phone}
+                  onChange={(e) => setEditForm(prev => ({ ...prev, phone: e.target.value }))}
+                  placeholder="05xxxxxxxx"
+                  required
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="edit-email">البريد الإلكتروني</Label>
+                <Input
+                  id="edit-email"
+                  type="email"
+                  value={editForm.email}
+                  onChange={(e) => setEditForm(prev => ({ ...prev, email: e.target.value }))}
+                  placeholder="example@company.com"
+                />
+              </div>
             </div>
-            <div className="space-y-2">
-              <Label htmlFor="edit-position">المنصب</Label>
-              <Input
-                id="edit-position"
-                value={editForm.position}
-                onChange={(e) => setEditForm(prev => ({ ...prev, position: e.target.value }))}
-                placeholder="منصب الموظف..."
-              />
+
+            {/* الصف الثالث: المنصب والراتب */}
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="edit-position">المنصب</Label>
+                <Input
+                  id="edit-position"
+                  value={editForm.position}
+                  onChange={(e) => setEditForm(prev => ({ ...prev, position: e.target.value }))}
+                  placeholder="منصب الموظف..."
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="edit-salary">الراتب (ريال سعودي)</Label>
+                <Input
+                  id="edit-salary"
+                  type="number"
+                  value={editForm.salary}
+                  onChange={(e) => setEditForm(prev => ({ ...prev, salary: e.target.value }))}
+                  placeholder="0"
+                  min="0"
+                  step="100"
+                />
+              </div>
             </div>
+
+            {/* الصف الرابع: المؤسسة وتاريخ التوظيف */}
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="edit-institution">المؤسسة / الكفيل</Label>
+                <Select
+                  value={editForm.institutionId}
+                  onValueChange={(value) => setEditForm(prev => ({ ...prev, institutionId: value }))}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="اختر المؤسسة" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="unsponsored">غير مكفول</SelectItem>
+                    {institutions.filter(inst => inst.id !== 'unsponsored').map((institution) => (
+                      <SelectItem key={institution.id} value={institution.id}>
+                        {institution.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="edit-hire-date">تاريخ التوظيف</Label>
+                <Input
+                  id="edit-hire-date"
+                  type="date"
+                  value={editForm.hireDate}
+                  onChange={(e) => setEditForm(prev => ({ ...prev, hireDate: e.target.value }))}
+                />
+              </div>
+            </div>
+
+            {/* صورة الموظف */}
             <div className="space-y-2">
-              <Label htmlFor="edit-salary">الراتب</Label>
-              <Input
-                id="edit-salary"
-                type="number"
-                value={editForm.salary}
-                onChange={(e) => setEditForm(prev => ({ ...prev, salary: e.target.value }))}
-                placeholder="راتب الموظف..."
-              />
+              <Label htmlFor="edit-photoUrl">صورة الموظف (اختياري)</Label>
+              <div className="flex gap-2">
+                <Input
+                  id="edit-photoUrl"
+                  type="text"
+                  value={editForm.photoUrl}
+                  onChange={(e) => setEditForm(prev => ({ ...prev, photoUrl: e.target.value }))}
+                  placeholder="رابط الصورة أو اتركه فارغاً"
+                />
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={handleEditPhotoUpload}
+                  disabled={editPhotoUploading}
+                >
+                  {editPhotoUploading ? "جاري الرفع..." : "رفع صورة"}
+                </Button>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                يمكنك إدخال رابط الصورة أو رفع صورة من جهازك
+              </p>
+              {editForm.photoUrl && (
+                <div className="mt-2">
+                  <img
+                    src={editForm.photoUrl}
+                    alt="معاينة صورة الموظف"
+                    className="w-20 h-20 object-cover rounded-lg border"
+                    onError={(e) => {
+                      (e.target as HTMLImageElement).style.display = 'none';
+                    }}
+                  />
+                </div>
+              )}
             </div>
           </div>
           <DialogFooter>
@@ -1138,8 +1332,14 @@ export default function EmployeeProfilePage({ params }: { params: Promise<{ id: 
                   <SelectValue placeholder="اختر سبب الأرشفة..." />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="terminated">إنهاء خدمات</SelectItem>
-                  <SelectItem value="final_exit">خروج نهائي</SelectItem>
+                  <SelectItem value="resignation">استقالة</SelectItem>
+                  <SelectItem value="termination">إنهاء خدمة</SelectItem>
+                  <SelectItem value="retirement">تقاعد</SelectItem>
+                  <SelectItem value="transfer">نقل لمؤسسة أخرى</SelectItem>
+                  <SelectItem value="contract_end">انتهاء العقد</SelectItem>
+                  <SelectItem value="medical_leave">إجازة مرضية طويلة</SelectItem>
+                  <SelectItem value="disciplinary">أسباب تأديبية</SelectItem>
+                  <SelectItem value="other">أخرى</SelectItem>
                 </SelectContent>
               </Select>
             </div>

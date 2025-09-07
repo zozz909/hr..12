@@ -2,7 +2,8 @@ import type { Metadata } from 'next';
 import './globals.css';
 import { cn } from '@/lib/utils';
 import { Toaster } from '@/components/ui/toaster';
-import { ClientNavbar } from '@/components/client-navbar';
+import { AuthProvider } from '@/hooks/use-auth';
+import { AuthGuard } from '@/components/auth-guard';
 
 
 export const metadata: Metadata = {
@@ -26,13 +27,12 @@ export default function RootLayout({
         />
       </head>
       <body className={cn('font-body antialiased')}>
-        <div className="flex min-h-screen">
-          <ClientNavbar />
-          <main className="flex-1">
-              {children}
-          </main>
-        </div>
-        <Toaster />
+        <AuthProvider>
+          <AuthGuard>
+            {children}
+          </AuthGuard>
+          <Toaster />
+        </AuthProvider>
       </body>
     </html>
   );

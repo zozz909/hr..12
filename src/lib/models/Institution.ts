@@ -1,5 +1,20 @@
 import { executeQuery, generateId, formatDateForMySQL } from '../db';
 
+// Helper function to determine document status based on expiry date
+function getDocumentStatus(expiryDate: string): 'active' | 'expired' | 'expiring_soon' {
+  const today = new Date();
+  const expiry = new Date(expiryDate);
+  const daysUntilExpiry = Math.ceil((expiry.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+
+  if (daysUntilExpiry < 0) {
+    return 'expired';
+  } else if (daysUntilExpiry <= 30) {
+    return 'expiring_soon';
+  } else {
+    return 'active';
+  }
+}
+
 export interface Institution {
   id: string;
   name: string;
@@ -28,6 +43,9 @@ export interface InstitutionDocument {
   documentType: 'license' | 'commercial_record' | 'tax_certificate' | 'other';
   uploadDate?: string;
   createdAt?: string;
+  isRenewable?: boolean;
+  expiryDate?: string;
+  status?: 'active' | 'expired' | 'expiring_soon';
 }
 
 export interface Subscription {
@@ -207,10 +225,12 @@ export class InstitutionModel {
   // Add document to institution
   static async addDocument(institutionId: string, document: Omit<InstitutionDocument, 'id' | 'institutionId' | 'createdAt'>): Promise<InstitutionDocument> {
     const id = generateId('doc');
+    const status = document.expiryDate ? getDocumentStatus(document.expiryDate) : 'active';
+
     const query = `
       INSERT INTO institution_documents (
-        id, institution_id, name, file_path, file_url, document_type
-      ) VALUES (?, ?, ?, ?, ?, ?)
+        id, institution_id, name, file_path, file_url, document_type, is_renewable, expiry_date, status
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
     `;
 
     const values = [
@@ -219,7 +239,10 @@ export class InstitutionModel {
       document.name,
       document.filePath || null,
       document.fileUrl || null,
-      document.documentType
+      document.documentType,
+      document.isRenewable || false,
+      document.expiryDate ? formatDateForMySQL(document.expiryDate) : null,
+      status
     ];
 
     await executeQuery(query, values);
@@ -243,7 +266,8 @@ export class InstitutionModel {
       SELECT
         id, institution_id as institutionId, name, file_path as filePath,
         file_url as fileUrl, document_type as documentType,
-        upload_date as uploadDate, created_at as createdAt
+        upload_date as uploadDate, created_at as createdAt,
+        is_renewable as isRenewable, expiry_date as expiryDate, status
       FROM institution_documents
       WHERE institution_id = ?
       ORDER BY created_at DESC
@@ -298,5 +322,16 @@ export class InstitutionModel {
     `;
 
     return await executeQuery(query, [institutionId]);
+  }
+
+  // Renew document
+  static async renewDocument(documentId: string, newExpiryDate: string): Promise<void> {
+    const status = getDocumentStatus(newExpiryDate);
+    const query = `
+      UPDATE institution_documents
+      SET expiry_date = ?, status = ?
+      WHERE id = ?
+    `;
+    await executeQuery(query, [formatDateForMySQL(newExpiryDate), status, documentId]);
   }
 }

@@ -44,6 +44,7 @@ import {
   HelpCircle,
   Eye,
   Download,
+  Calendar,
 } from 'lucide-react';
 import Link from 'next/link';
 import {
@@ -288,6 +289,7 @@ function AddEmployeeDialog({ institutionId, onSuccess }: {
 }) {
   const [open, setOpen] = React.useState(false);
   const [loading, setLoading] = React.useState(false);
+  const [photoUploading, setPhotoUploading] = React.useState(false);
   const [branches, setBranches] = React.useState<Branch[]>([]);
   const [formData, setFormData] = React.useState({
     name: '',
@@ -326,6 +328,78 @@ function AddEmployeeDialog({ institutionId, onSuccess }: {
     }
   }, [open, institutionId]);
 
+  // Handle photo upload
+  const handlePhotoUpload = async () => {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = 'image/*';
+    input.onchange = async (e) => {
+      const file = (e.target as HTMLInputElement).files?.[0];
+      if (!file) return;
+
+      // Validate file size (max 5MB for images)
+      const maxSize = 5 * 1024 * 1024; // 5MB
+      if (file.size > maxSize) {
+        toast({
+          variant: "destructive",
+          title: "حجم الملف كبير جداً",
+          description: "يجب أن يكون حجم الصورة أقل من 5 ميجابايت",
+        });
+        return;
+      }
+
+      // Validate file type
+      if (!file.type.startsWith('image/')) {
+        toast({
+          variant: "destructive",
+          title: "نوع ملف غير صحيح",
+          description: "يرجى اختيار ملف صورة صالح",
+        });
+        return;
+      }
+
+      try {
+        setPhotoUploading(true);
+
+        const formData = new FormData();
+        formData.append('file', file);
+        formData.append('entityType', 'employee');
+        formData.append('entityId', 'temp'); // Temporary ID for new employee
+
+        const response = await fetch('/api/upload', {
+          method: 'POST',
+          body: formData,
+        });
+
+        const result = await response.json();
+
+        if (result.success) {
+          // Ensure the URL is complete
+          const fullUrl = result.data.fileUrl.startsWith('http')
+            ? result.data.fileUrl
+            : `${window.location.origin}${result.data.fileUrl}`;
+
+          setFormData(prev => ({ ...prev, photoUrl: fullUrl }));
+          toast({
+            title: "تم رفع الصورة بنجاح",
+            description: "تم رفع صورة الموظف بنجاح",
+          });
+        } else {
+          throw new Error(result.error || 'فشل في رفع الصورة');
+        }
+      } catch (error) {
+        toast({
+          variant: "destructive",
+          title: "خطأ في رفع الصورة",
+          description: error instanceof Error ? error.message : "حدث خطأ أثناء رفع الصورة",
+        });
+      } finally {
+        setPhotoUploading(false);
+      }
+    };
+    input.click();
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
@@ -338,7 +412,10 @@ function AddEmployeeDialog({ institutionId, onSuccess }: {
         salary: parseFloat(formData.salary) || 0
       };
 
-      const result = await employeeApi.create(employeeData);
+      const result = await employeeApi.create({
+        ...employeeData,
+        status: 'active' as const
+      });
 
       if (result.success) {
         toast({
@@ -564,18 +641,36 @@ function AddEmployeeDialog({ institutionId, onSuccess }: {
                 <div className="flex gap-2">
                   <Input
                     id="photoUrl"
-                    type="url"
+                    type="text"
                     value={formData.photoUrl}
                     onChange={(e) => setFormData(prev => ({ ...prev, photoUrl: e.target.value }))}
                     placeholder="رابط الصورة أو اتركه فارغاً"
                   />
-                  <Button type="button" variant="outline" size="sm">
-                    رفع صورة
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={handlePhotoUpload}
+                    disabled={photoUploading}
+                  >
+                    {photoUploading ? "جاري الرفع..." : "رفع صورة"}
                   </Button>
                 </div>
                 <p className="text-xs text-muted-foreground">
                   يمكنك إدخال رابط الصورة أو رفع صورة من جهازك
                 </p>
+                {formData.photoUrl && (
+                  <div className="mt-2">
+                    <img
+                      src={formData.photoUrl}
+                      alt="معاينة صورة الموظف"
+                      className="w-20 h-20 object-cover rounded-lg border"
+                      onError={(e) => {
+                        (e.target as HTMLImageElement).style.display = 'none';
+                      }}
+                    />
+                  </div>
+                )}
               </div>
             </div>
           </div>
@@ -732,7 +827,9 @@ function UploadDocumentDialog({ institutionId, onSuccess }: {
   const [loading, setLoading] = React.useState(false);
   const [formData, setFormData] = React.useState({
     name: '',
-    documentType: 'license'
+    documentType: 'license',
+    isRenewable: false,
+    expiryDate: ''
   });
   const [file, setFile] = React.useState<File | null>(null);
   const { toast } = useToast();
@@ -778,7 +875,7 @@ function UploadDocumentDialog({ institutionId, onSuccess }: {
 
       // Then, save document metadata
       const documentData = {
-        entityType: 'institution',
+        entityType: 'institution' as const,
         entityId: institutionId,
         documentType: formData.documentType,
         fileName: formData.name,
@@ -786,7 +883,9 @@ function UploadDocumentDialog({ institutionId, onSuccess }: {
         fileUrl: uploadResult.data.fileUrl,
         originalName: uploadResult.data.fileName,
         fileSize: uploadResult.data.fileSize,
-        mimeType: uploadResult.data.mimeType
+        mimeType: uploadResult.data.mimeType,
+        expiryDate: formData.isRenewable ? formData.expiryDate : undefined,
+        isRenewable: formData.isRenewable
       };
 
       const response = await documentApi.create(documentData);
@@ -799,7 +898,9 @@ function UploadDocumentDialog({ institutionId, onSuccess }: {
         setOpen(false);
         setFormData({
           name: '',
-          documentType: 'license'
+          documentType: 'license',
+          isRenewable: false,
+          expiryDate: ''
         });
         setFile(null);
         onSuccess();
@@ -864,6 +965,33 @@ function UploadDocumentDialog({ institutionId, onSuccess }: {
                 </SelectContent>
               </Select>
             </div>
+            <div className="space-y-2">
+              <div className="flex items-center space-x-2">
+                <input
+                  type="checkbox"
+                  id="is-renewable"
+                  checked={formData.isRenewable}
+                  onChange={(e) => setFormData(prev => ({ ...prev, isRenewable: e.target.checked }))}
+                  className="rounded border-gray-300"
+                />
+                <Label htmlFor="is-renewable" className="text-sm font-medium">
+                  هل المستند قابل للتجديد؟
+                </Label>
+              </div>
+            </div>
+
+            {formData.isRenewable && (
+              <div className="space-y-2">
+                <Label htmlFor="expiry-date">تاريخ انتهاء الصلاحية</Label>
+                <Input
+                  id="expiry-date"
+                  type="date"
+                  value={formData.expiryDate}
+                  onChange={(e) => setFormData(prev => ({ ...prev, expiryDate: e.target.value }))}
+                />
+              </div>
+            )}
+
             <div className="space-y-2">
               <Label htmlFor="doc-file">الملف</Label>
               <Input
@@ -1008,9 +1136,34 @@ export default function InstitutionPage({ params }: { params: Promise<{ id: stri
   // Subscription management state
   const [editingSubscription, setEditingSubscription] = React.useState<any | null>(null);
   const [deletingSubscription, setDeletingSubscription] = React.useState<any | null>(null);
+  const [renewingSubscription, setRenewingSubscription] = React.useState<any | null>(null);
+  const [renewalPeriod, setRenewalPeriod] = React.useState('');
 
   // Document management state
   const [deletingDocument, setDeletingDocument] = React.useState<any | null>(null);
+  const [renewingDocument, setRenewingDocument] = React.useState<any | null>(null);
+  const [documentRenewalPeriod, setDocumentRenewalPeriod] = React.useState('');
+
+  // Commercial Record renewal state
+  const [renewingCR, setRenewingCR] = React.useState(false);
+  const [crRenewalPeriod, setCrRenewalPeriod] = React.useState('');
+
+  // Commercial Record edit state
+  const [editingCR, setEditingCR] = React.useState(false);
+  const [crEditData, setCrEditData] = React.useState({
+    crNumber: '',
+    crIssueDate: '',
+    crExpiryDate: ''
+  });
+  const [open, setOpen] = React.useState(false);
+  const [uploading, setUploading] = React.useState(false);
+  const [file, setFile] = React.useState<File | null>(null);
+  const [formData, setFormData] = React.useState({
+    name: '',
+    documentType: 'license',
+    isRenewable: false,
+    expiryDate: ''
+  });
 
   // Fetch institution and employees data
   const fetchData = React.useCallback(async () => {
@@ -1092,6 +1245,179 @@ export default function InstitutionPage({ params }: { params: Promise<{ id: stri
     }
   };
 
+  // Handle subscription renewal
+  const handleRenewSubscription = async () => {
+    if (!renewalPeriod || !renewingSubscription) return;
+
+    try {
+      // حساب تاريخ الانتهاء الجديد
+      const currentDate = new Date();
+      const months = parseInt(renewalPeriod);
+      const newExpiryDate = new Date(currentDate.setMonth(currentDate.getMonth() + months));
+      const formattedDate = newExpiryDate.toISOString().split('T')[0];
+
+      const response = await subscriptionApi.update(renewingSubscription.id, {
+        expiryDate: formattedDate,
+        status: 'active'
+      });
+
+      if (response.success) {
+        toast({
+          title: "تم التجديد بنجاح",
+          description: `تم تجديد اشتراك ${renewingSubscription.name} بنجاح حتى ${newExpiryDate.toLocaleDateString('ar-SA')}`,
+          variant: "default",
+        });
+
+        setRenewingSubscription(null);
+        setRenewalPeriod('');
+        fetchData(); // Refresh data
+      } else {
+        toast({
+          title: "خطأ في التجديد",
+          description: response.error || "حدث خطأ أثناء تجديد الاشتراك",
+          variant: "destructive",
+        });
+      }
+    } catch (error) {
+      console.error('Error renewing subscription:', error);
+      toast({
+        title: "خطأ في التجديد",
+        description: "حدث خطأ أثناء تجديد الاشتراك",
+        variant: "destructive",
+      });
+    }
+  };
+
+  // Handle document renewal
+  const handleRenewDocument = async () => {
+    if (!documentRenewalPeriod || !renewingDocument) return;
+
+    try {
+      // حساب تاريخ الانتهاء الجديد
+      const currentDate = new Date();
+      const months = parseInt(documentRenewalPeriod);
+      const newExpiryDate = new Date(currentDate.setMonth(currentDate.getMonth() + months));
+      const formattedDate = newExpiryDate.toISOString().split('T')[0];
+
+      const response = await documentApi.renew(renewingDocument.id, formattedDate);
+
+      if (response.success) {
+        toast({
+          title: "تم التجديد بنجاح",
+          description: `تم تجديد مستند ${renewingDocument.fileName} بنجاح حتى ${newExpiryDate.toLocaleDateString('ar-SA')}`,
+          variant: "default",
+        });
+
+        setRenewingDocument(null);
+        setDocumentRenewalPeriod('');
+        fetchData(); // Refresh data
+      } else {
+        toast({
+          title: "خطأ في التجديد",
+          description: response.error || "حدث خطأ أثناء تجديد المستند",
+          variant: "destructive",
+        });
+      }
+    } catch (error) {
+      console.error('Error renewing document:', error);
+      toast({
+        title: "خطأ في التجديد",
+        description: "حدث خطأ أثناء تجديد المستند",
+        variant: "destructive",
+      });
+    }
+  };
+
+  // Handle commercial record renewal
+  const handleRenewCR = async () => {
+    if (!crRenewalPeriod || !institution) return;
+
+    try {
+      // حساب تاريخ الانتهاء الجديد
+      const currentDate = new Date();
+      const months = parseInt(crRenewalPeriod);
+      const newExpiryDate = new Date(currentDate.setMonth(currentDate.getMonth() + months));
+      const formattedDate = newExpiryDate.toISOString().split('T')[0];
+
+      const response = await institutionApi.update(institution.id, {
+        crExpiryDate: formattedDate
+      });
+
+      if (response.success) {
+        toast({
+          title: "تم التجديد بنجاح",
+          description: `تم تجديد السجل التجاري بنجاح حتى ${newExpiryDate.toLocaleDateString('ar-SA')}`,
+          variant: "default",
+        });
+
+        setRenewingCR(false);
+        setCrRenewalPeriod('');
+        fetchData(); // Refresh data
+      } else {
+        toast({
+          title: "خطأ في التجديد",
+          description: response.error || "حدث خطأ أثناء تجديد السجل التجاري",
+          variant: "destructive",
+        });
+      }
+    } catch (error) {
+      console.error('Error renewing commercial record:', error);
+      toast({
+        title: "خطأ في التجديد",
+        description: "حدث خطأ أثناء تجديد السجل التجاري",
+        variant: "destructive",
+      });
+    }
+  };
+
+  // Handle commercial record edit
+  const handleEditCR = () => {
+    if (!institution) return;
+
+    setCrEditData({
+      crNumber: institution.crNumber || '',
+      crIssueDate: institution.crIssueDate || '',
+      crExpiryDate: institution.crExpiryDate || ''
+    });
+    setEditingCR(true);
+  };
+
+  const handleSaveCR = async () => {
+    if (!institution) return;
+
+    try {
+      const response = await institutionApi.update(institution.id, {
+        crNumber: crEditData.crNumber,
+        crIssueDate: crEditData.crIssueDate,
+        crExpiryDate: crEditData.crExpiryDate
+      });
+
+      if (response.success) {
+        toast({
+          title: "تم التحديث بنجاح",
+          description: "تم تحديث بيانات السجل التجاري بنجاح",
+          variant: "default",
+        });
+
+        setEditingCR(false);
+        fetchData(); // Refresh data
+      } else {
+        toast({
+          title: "خطأ في التحديث",
+          description: response.error || "حدث خطأ أثناء تحديث السجل التجاري",
+          variant: "destructive",
+        });
+      }
+    } catch (error) {
+      console.error('Error updating commercial record:', error);
+      toast({
+        title: "خطأ في التحديث",
+        description: "حدث خطأ أثناء تحديث السجل التجاري",
+        variant: "destructive",
+      });
+    }
+  };
+
   // Handle document deletion
   const handleDeleteDocument = async (document: any) => {
     try {
@@ -1119,6 +1445,83 @@ export default function InstitutionPage({ params }: { params: Promise<{ id: stri
         description: "حدث خطأ أثناء حذف المستند",
         variant: "destructive",
       });
+    }
+  };
+
+  // Handle document upload
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!file) return;
+
+    try {
+      setUploading(true);
+
+      // First, upload the file
+      const uploadFormData = new FormData();
+      uploadFormData.append('file', file);
+      uploadFormData.append('entityType', 'institution');
+      uploadFormData.append('entityId', id);
+
+      const uploadResponse = await fetch('/api/upload', {
+        method: 'POST',
+        body: uploadFormData,
+      });
+
+      const uploadResult = await uploadResponse.json();
+
+      if (!uploadResult.success) {
+        throw new Error(uploadResult.error || 'Failed to upload file');
+      }
+
+      // Then, save document metadata
+      const documentData = {
+        entityType: 'institution' as const,
+        entityId: id,
+        documentType: formData.documentType,
+        fileName: formData.name,
+        filePath: uploadResult.data.filePath,
+        fileUrl: uploadResult.data.fileUrl,
+        originalName: uploadResult.data.fileName,
+        fileSize: uploadResult.data.fileSize,
+        mimeType: uploadResult.data.mimeType,
+        expiryDate: formData.isRenewable ? formData.expiryDate : undefined,
+        isRenewable: formData.isRenewable
+      };
+
+      const response = await documentApi.create(documentData);
+
+      if (response.success) {
+        toast({
+          title: "تم رفع المستند بنجاح",
+          description: `تم رفع ${formData.name} بنجاح`,
+          variant: "default",
+        });
+
+        setOpen(false);
+        setFormData({
+          name: '',
+          documentType: 'license',
+          isRenewable: false,
+          expiryDate: ''
+        });
+        setFile(null);
+        fetchData(); // Refresh data
+      } else {
+        toast({
+          variant: "destructive",
+          title: "حدث خطأ",
+          description: response.error || "فشل في حفظ بيانات المستند",
+        });
+      }
+    } catch (error) {
+      console.error('Error uploading document:', error);
+      toast({
+        title: "خطأ في رفع المستند",
+        description: error instanceof Error ? error.message : "حدث خطأ أثناء رفع المستند",
+        variant: "destructive",
+      });
+    } finally {
+      setUploading(false);
     }
   };
 
@@ -1237,11 +1640,11 @@ export default function InstitutionPage({ params }: { params: Promise<{ id: stri
                   {employees.map((emp) => (
                     <TableRow key={emp.id}>
                       <TableCell className="font-medium">{emp.name}</TableCell>
-                      <TableCell><StatusIcon status={getStatus(emp.iqamaExpiry)} /></TableCell>
-                      <TableCell><StatusIcon status={getStatus(emp.healthInsuranceExpiry)} /></TableCell>
-                      <TableCell><StatusIcon status={getStatus(emp.workPermitExpiry)} /></TableCell>
-                      <TableCell><StatusIcon status={getStatus(emp.healthCertExpiry)} /></TableCell>
-                      <TableCell><StatusIcon status={getStatus(emp.contractExpiry)} /></TableCell>
+                      <TableCell><StatusIcon status={getStatus(emp.iqamaExpiry || '')} /></TableCell>
+                      <TableCell><StatusIcon status={getStatus(emp.healthInsuranceExpiry || '')} /></TableCell>
+                      <TableCell><StatusIcon status={getStatus(emp.workPermitExpiry || '')} /></TableCell>
+                      <TableCell><StatusIcon status={getStatus(emp.healthCertExpiry || '')} /></TableCell>
+                      <TableCell><StatusIcon status={getStatus(emp.contractExpiry || '')} /></TableCell>
                       <TableCell className="text-left">
                         <Button asChild variant="ghost" size="sm">
                           <Link href={`/employees/${emp.id}`}>عرض التفاصيل</Link>
@@ -1273,7 +1676,7 @@ export default function InstitutionPage({ params }: { params: Promise<{ id: stri
                             <p className="font-semibold">{institution.crNumber}</p>
                         </div>
                     </div>
-                    <Button variant="ghost" size="icon"><Edit className="h-4 w-4"/></Button>
+                    <Button variant="ghost" size="icon" onClick={handleEditCR}><Edit className="h-4 w-4"/></Button>
                 </div>
                 <div className="flex items-center justify-between p-4 border rounded-lg">
                     <div className="flex items-center gap-4">
@@ -1283,19 +1686,46 @@ export default function InstitutionPage({ params }: { params: Promise<{ id: stri
                             <p className="font-semibold">{institution.crIssueDate || 'غير محدد'}</p>
                         </div>
                     </div>
-                     <Button variant="ghost" size="icon"><Edit className="h-4 w-4"/></Button>
+                     <Button variant="ghost" size="icon" onClick={handleEditCR}><Edit className="h-4 w-4"/></Button>
                 </div>
                  <div className="flex items-center justify-between p-4 border rounded-lg">
                     <div className="flex items-center gap-4">
-                        <FileWarning className="w-8 h-8 text-primary"/>
+                        {(() => {
+                          const daysRemaining = getDaysRemaining(institution.crExpiryDate);
+                          if (daysRemaining <= 0) {
+                            return <FileWarning className="w-8 h-8 text-red-500"/>;
+                          } else if (daysRemaining <= 30) {
+                            return <FileWarning className="w-8 h-8 text-yellow-500"/>;
+                          } else {
+                            return <FileWarning className="w-8 h-8 text-green-500"/>;
+                          }
+                        })()}
                         <div>
                             <p className="text-sm text-muted-foreground">تاريخ انتهاء السجل التجاري</p>
-                            <p className="font-semibold">{institution.crExpiryDate} (متبقي {getDaysRemaining(institution.crExpiryDate)} يوم)</p>
+                            <div className="flex items-center gap-2">
+                              <p className="font-semibold">{institution.crExpiryDate}</p>
+                              {(() => {
+                                const daysRemaining = getDaysRemaining(institution.crExpiryDate);
+                                if (daysRemaining > 0) {
+                                  return <Badge variant="outline" className="text-xs bg-green-50 text-green-700 border-green-200">باقي {daysRemaining} يوم</Badge>;
+                                } else if (daysRemaining === 0) {
+                                  return <Badge variant="outline" className="text-xs bg-yellow-50 text-yellow-700 border-yellow-200">ينتهي اليوم</Badge>;
+                                } else {
+                                  return <Badge variant="destructive" className="text-xs">انتهى منذ {Math.abs(daysRemaining)} يوم</Badge>;
+                                }
+                              })()}
+                            </div>
                         </div>
                     </div>
                     <div className="flex items-center gap-2">
-                      <Button variant="outline" size="sm"><RefreshCcw className="ml-2 h-4 w-4" />تجديد</Button>
-                      <Button variant="ghost" size="icon"><Edit className="h-4 w-4"/></Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setRenewingCR(true)}
+                      >
+                        <RefreshCcw className="ml-2 h-4 w-4" />تجديد
+                      </Button>
+                      <Button variant="ghost" size="icon" onClick={handleEditCR}><Edit className="h-4 w-4"/></Button>
                     </div>
                 </div>
             </CardContent>
@@ -1348,6 +1778,14 @@ export default function InstitutionPage({ params }: { params: Promise<{ id: stri
                                             <Button
                                               variant="outline"
                                               size="sm"
+                                              onClick={() => setRenewingSubscription(sub)}
+                                            >
+                                              <RefreshCcw className="h-4 w-4 mr-1" />
+                                              تجديد
+                                            </Button>
+                                            <Button
+                                              variant="outline"
+                                              size="sm"
                                               onClick={() => setEditingSubscription(sub)}
                                             >
                                               <Edit className="h-4 w-4 mr-1" />
@@ -1375,68 +1813,205 @@ export default function InstitutionPage({ params }: { params: Promise<{ id: stri
             </Card>
         </TabsContent>
         <TabsContent value="documents">
-           <Card>
+          <Card>
             <CardHeader className="flex flex-row items-center justify-between">
-                <div>
-                    <CardTitle>المستندات الرسمية</CardTitle>
-                    <CardDescription>المستندات المرفوعة لـ {institution.name}</CardDescription>
-                </div>
-                <UploadDocumentDialog
-                  institutionId={institution.id}
-                  onSuccess={fetchData}
-                />
+              <div>
+                <CardTitle>المستندات الرسمية</CardTitle>
+                <CardDescription>المستندات المرفوعة لـ {institution.name}</CardDescription>
+              </div>
+              <Dialog open={open} onOpenChange={setOpen}>
+                <DialogTrigger asChild>
+                  <Button>
+                    <PlusCircle className="h-4 w-4 mr-2" />
+                    رفع مستند جديد
+                  </Button>
+                </DialogTrigger>
+                <DialogContent className="sm:max-w-[425px]">
+                  <DialogHeader>
+                    <DialogTitle>رفع مستند جديد</DialogTitle>
+                    <DialogDescription>
+                      اختر ملفًا وقم بتسميته لرفعه إلى سجلات المؤسسة.
+                    </DialogDescription>
+                  </DialogHeader>
+                  <form onSubmit={handleSubmit}>
+                    <div className="grid gap-4 py-4">
+                      <div className="space-y-2">
+                        <Label htmlFor="doc-name">اسم المستند</Label>
+                        <Input
+                          id="doc-name"
+                          value={formData.name}
+                          onChange={(e) => setFormData(prev => ({ ...prev, name: e.target.value }))}
+                          placeholder="مثال: رخصة تجارية"
+                          required
+                        />
+                      </div>
+
+                      <div className="space-y-2">
+                        <Label htmlFor="doc-type">نوع المستند</Label>
+                        <select
+                          id="doc-type"
+                          className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+                          value={formData.documentType}
+                          onChange={(e) => setFormData(prev => ({ ...prev, documentType: e.target.value }))}
+                        >
+                          <option value="license">رخصة</option>
+                          <option value="commercial_record">سجل تجاري</option>
+                          <option value="tax_certificate">شهادة ضريبية</option>
+                          <option value="other">أخرى</option>
+                        </select>
+                      </div>
+
+                      <div className="space-y-2">
+                        <div className="flex items-center space-x-2">
+                          <input
+                            type="checkbox"
+                            id="is-renewable"
+                            checked={formData.isRenewable}
+                            onChange={(e) => setFormData(prev => ({ ...prev, isRenewable: e.target.checked }))}
+                            className="rounded border-gray-300"
+                          />
+                          <Label htmlFor="is-renewable" className="text-sm font-medium">
+                            هل المستند قابل للتجديد؟
+                          </Label>
+                        </div>
+                      </div>
+
+                      {formData.isRenewable && (
+                        <div className="space-y-2">
+                          <Label htmlFor="expiry-date">تاريخ انتهاء الصلاحية</Label>
+                          <Input
+                            id="expiry-date"
+                            type="date"
+                            value={formData.expiryDate}
+                            onChange={(e) => setFormData(prev => ({ ...prev, expiryDate: e.target.value }))}
+                          />
+                        </div>
+                      )}
+
+                      <div className="space-y-2">
+                        <Label htmlFor="doc-file">الملف</Label>
+                        <Input
+                          id="doc-file"
+                          type="file"
+                          accept=".pdf,.doc,.docx,.jpg,.jpeg,.png"
+                          onChange={(e) => setFile(e.target.files?.[0] || null)}
+                          required
+                        />
+                        {file && (
+                          <p className="text-sm text-muted-foreground">
+                            الملف المختار: {file.name} ({(file.size / 1024 / 1024).toFixed(2)} MB)
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                    <DialogFooter>
+                      <Button type="button" variant="outline" onClick={() => setOpen(false)}>
+                        إلغاء
+                      </Button>
+                      <Button type="submit" disabled={uploading}>
+                        {uploading ? 'جاري الرفع...' : 'رفع المستند'}
+                      </Button>
+                    </DialogFooter>
+                  </form>
+                </DialogContent>
+              </Dialog>
             </CardHeader>
             <CardContent>
-                {documents && documents.length > 0 ? (
-                    <ul className="space-y-2">
-                        {documents.map(doc => (
-                            <li key={doc.id} className="flex items-center justify-between p-3 border rounded-lg">
-                                <span className="flex items-center gap-2">
-                                    <FileText className="h-5 w-5 text-muted-foreground" />
-                                    <a href={doc.fileUrl} className="hover:underline" target="_blank" rel="noopener noreferrer">
-                                      {doc.fileName}
-                                    </a>
-                                </span>
-                                <div className="flex items-center gap-2">
-                                    <Button
-                                      variant="outline"
-                                      size="sm"
-                                      asChild
-                                    >
-                                      <a href={doc.fileUrl} target="_blank" rel="noopener noreferrer">
-                                        <Eye className="h-4 w-4 mr-1" />
-                                        عرض
-                                      </a>
-                                    </Button>
-                                    <Button
-                                      variant="outline"
-                                      size="sm"
-                                      asChild
-                                    >
-                                      <a href={`/api/download/${doc.fileUrl?.startsWith('/') ? doc.fileUrl.substring(1) : doc.fileUrl}`} download={doc.fileName}>
-                                        <Download className="h-4 w-4 mr-1" />
-                                        تحميل
-                                      </a>
-                                    </Button>
-                                    <Button
-                                      variant="outline"
-                                      size="sm"
-                                      onClick={() => setDeletingDocument(doc)}
-                                    >
-                                      <Trash2 className="h-4 w-4 mr-1" />
-                                      حذف
-                                    </Button>
-                                </div>
-                            </li>
-                        ))}
-                    </ul>
-                ): (
-                    <div className="text-center py-12 text-muted-foreground">
-                        <p>لم يتم رفع أي مستندات بعد.</p>
+              {documents && documents.length > 0 ? (
+                <div className="space-y-3">
+                  {documents.map(doc => (
+                    <div key={doc.id} className="flex items-center justify-between p-4 border rounded-lg bg-gray-50">
+                      <div className="flex flex-col gap-2">
+                        <div className="flex items-center gap-3">
+                          <FileText className="h-5 w-5 text-blue-600" />
+                          <span className="font-medium text-gray-900">{doc.fileName}</span>
+                          {doc.isRenewable && (
+                            <Badge variant="outline" className="text-xs bg-green-50 text-green-700 border-green-200">
+                              قابل للتجديد
+                            </Badge>
+                          )}
+                        </div>
+                        {doc.expiryDate && (
+                          <div className="flex items-center gap-2 mr-8">
+                            <Calendar className="h-4 w-4 text-gray-500" />
+                            <span className="text-sm text-gray-600">
+                              ينتهي في: {new Date(doc.expiryDate).toLocaleDateString('ar-SA')}
+                              {(() => {
+                                const daysRemaining = getDaysRemaining(doc.expiryDate);
+                                if (daysRemaining > 0) {
+                                  return ` (باقي ${daysRemaining} يوم)`;
+                                } else if (daysRemaining === 0) {
+                                  return ` (ينتهي اليوم)`;
+                                } else {
+                                  return ` (انتهى منذ ${Math.abs(daysRemaining)} يوم)`;
+                                }
+                              })()}
+                            </span>
+                            {doc.status === 'expired' && (
+                              <Badge variant="destructive" className="text-xs">منتهي الصلاحية</Badge>
+                            )}
+                            {doc.status === 'expiring_soon' && (
+                              <Badge variant="outline" className="text-xs border-orange-500 text-orange-600 bg-orange-50">
+                                على وشك الانتهاء
+                              </Badge>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-2">
+                        {doc.isRenewable && (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => setRenewingDocument(doc)}
+                            className="text-green-600 border-green-200 hover:bg-green-50"
+                          >
+                            <RefreshCcw className="h-4 w-4 mr-1" />
+                            تجديد
+                          </Button>
+                        )}
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          asChild
+                        >
+                          <a href={doc.fileUrl} target="_blank" rel="noopener noreferrer">
+                            <Eye className="h-4 w-4 mr-1" />
+                            عرض
+                          </a>
+                        </Button>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          asChild
+                        >
+                          <a href={doc.fileUrl} download={doc.name}>
+                            <Download className="h-4 w-4 mr-1" />
+                            تحميل
+                          </a>
+                        </Button>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => setDeletingDocument(doc)}
+                          className="text-red-600 border-red-200 hover:bg-red-50"
+                        >
+                          <Trash2 className="h-4 w-4 mr-1" />
+                          حذف
+                        </Button>
+                      </div>
                     </div>
-                )}
+                  ))}
+                </div>
+              ) : (
+                <div className="text-center py-12 text-muted-foreground">
+                  <FileText className="h-12 w-12 mx-auto mb-4 text-gray-300" />
+                  <p className="text-lg font-medium mb-2">لا توجد مستندات</p>
+                  <p className="text-sm">لم يتم رفع أي مستندات لهذه المؤسسة بعد</p>
+                </div>
+              )}
             </CardContent>
-           </Card>
+          </Card>
         </TabsContent>
       </Tabs>
 
@@ -1497,6 +2072,216 @@ export default function InstitutionPage({ params }: { params: Promise<{ id: stri
           onCancel={() => setEditingSubscription(null)}
         />
       )}
+
+      {/* Renew Subscription Dialog */}
+      <Dialog open={!!renewingSubscription} onOpenChange={() => setRenewingSubscription(null)}>
+        <DialogContent className="sm:max-w-[425px]">
+          <DialogHeader>
+            <DialogTitle>تجديد الاشتراك</DialogTitle>
+            <DialogDescription>
+              تجديد اشتراك {renewingSubscription?.name} لمؤسسة {institution?.name}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-4 py-4">
+            <div className="grid grid-cols-4 items-center gap-4">
+              <Label htmlFor="renewal-period" className="text-right">فترة التجديد</Label>
+              <select
+                id="renewal-period"
+                className="col-span-3 flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+                value={renewalPeriod}
+                onChange={(e) => setRenewalPeriod(e.target.value)}
+              >
+                <option value="">اختر فترة التجديد</option>
+                <option value="3">3 أشهر</option>
+                <option value="6">6 أشهر</option>
+                <option value="12">سنة واحدة</option>
+                <option value="24">سنتان</option>
+              </select>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => {
+                setRenewingSubscription(null);
+                setRenewalPeriod('');
+              }}
+            >
+              إلغاء
+            </Button>
+            <Button
+              type="button"
+              onClick={handleRenewSubscription}
+              disabled={!renewalPeriod}
+            >
+              تجديد
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Renew Document Dialog */}
+      <Dialog open={!!renewingDocument} onOpenChange={() => setRenewingDocument(null)}>
+        <DialogContent className="sm:max-w-[425px]">
+          <DialogHeader>
+            <DialogTitle>تجديد المستند</DialogTitle>
+            <DialogDescription>
+              تجديد مستند {renewingDocument?.fileName} لمؤسسة {institution?.name}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-4 py-4">
+            <div className="grid grid-cols-4 items-center gap-4">
+              <Label htmlFor="document-renewal-period" className="text-right">فترة التجديد</Label>
+              <select
+                id="document-renewal-period"
+                className="col-span-3 flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+                value={documentRenewalPeriod}
+                onChange={(e) => setDocumentRenewalPeriod(e.target.value)}
+              >
+                <option value="">اختر فترة التجديد</option>
+                <option value="3">3 أشهر</option>
+                <option value="6">6 أشهر</option>
+                <option value="12">سنة واحدة</option>
+                <option value="24">سنتان</option>
+                <option value="36">3 سنوات</option>
+              </select>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => {
+                setRenewingDocument(null);
+                setDocumentRenewalPeriod('');
+              }}
+            >
+              إلغاء
+            </Button>
+            <Button
+              type="button"
+              onClick={handleRenewDocument}
+              disabled={!documentRenewalPeriod}
+            >
+              تجديد
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Renew Commercial Record Dialog */}
+      <Dialog open={renewingCR} onOpenChange={() => setRenewingCR(false)}>
+        <DialogContent className="sm:max-w-[425px]">
+          <DialogHeader>
+            <DialogTitle>تجديد السجل التجاري</DialogTitle>
+            <DialogDescription>
+              تجديد السجل التجاري لمؤسسة {institution?.name}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-4 py-4">
+            <div className="grid grid-cols-4 items-center gap-4">
+              <Label htmlFor="cr-renewal-period" className="text-right">فترة التجديد</Label>
+              <Select value={crRenewalPeriod} onValueChange={setCrRenewalPeriod}>
+                <SelectTrigger className="col-span-3">
+                  <SelectValue placeholder="اختر فترة التجديد" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="12">سنة واحدة (12 شهر)</SelectItem>
+                  <SelectItem value="24">سنتان (24 شهر)</SelectItem>
+                  <SelectItem value="36">ثلاث سنوات (36 شهر)</SelectItem>
+                  <SelectItem value="60">خمس سنوات (60 شهر)</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            {crRenewalPeriod && (
+              <div className="text-sm text-muted-foreground">
+                التاريخ الجديد للانتهاء: {new Date(new Date().setMonth(new Date().getMonth() + parseInt(crRenewalPeriod))).toLocaleDateString('ar-SA')}
+              </div>
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setRenewingCR(false)}>
+              إلغاء
+            </Button>
+            <Button onClick={handleRenewCR} disabled={!crRenewalPeriod}>
+              تجديد السجل التجاري
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Edit Commercial Record Dialog */}
+      <Dialog open={editingCR} onOpenChange={() => setEditingCR(false)}>
+        <DialogContent className="sm:max-w-[500px]">
+          <DialogHeader>
+            <DialogTitle>تعديل السجل التجاري</DialogTitle>
+            <DialogDescription>
+              تعديل بيانات السجل التجاري لمؤسسة {institution?.name}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-4 py-4">
+            <div className="space-y-2">
+              <Label htmlFor="edit-cr-number">رقم السجل التجاري</Label>
+              <Input
+                id="edit-cr-number"
+                value={crEditData.crNumber}
+                onChange={(e) => setCrEditData(prev => ({ ...prev, crNumber: e.target.value }))}
+                placeholder="أدخل رقم السجل التجاري"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="edit-cr-issue-date">تاريخ إصدار السجل التجاري</Label>
+              <Input
+                id="edit-cr-issue-date"
+                type="date"
+                value={crEditData.crIssueDate}
+                onChange={(e) => setCrEditData(prev => ({ ...prev, crIssueDate: e.target.value }))}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="edit-cr-expiry-date">تاريخ انتهاء السجل التجاري</Label>
+              <Input
+                id="edit-cr-expiry-date"
+                type="date"
+                value={crEditData.crExpiryDate}
+                onChange={(e) => setCrEditData(prev => ({ ...prev, crExpiryDate: e.target.value }))}
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setEditingCR(false)}>
+              إلغاء
+            </Button>
+            <Button onClick={handleSaveCR} disabled={!crEditData.crNumber || !crEditData.crExpiryDate}>
+              حفظ التغييرات
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Delete Document Dialog */}
+      <AlertDialog open={!!deletingDocument} onOpenChange={() => setDeletingDocument(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>تأكيد حذف المستند</AlertDialogTitle>
+            <AlertDialogDescription>
+              هل أنت متأكد من حذف مستند <strong>{deletingDocument?.fileName}</strong>؟
+              <br />
+              هذا الإجراء لا يمكن التراجع عنه وسيتم حذف الملف نهائياً.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>إلغاء</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => deletingDocument && handleDeleteDocument(deletingDocument)}
+              className="bg-red-600 hover:bg-red-700"
+            >
+              حذف المستند
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

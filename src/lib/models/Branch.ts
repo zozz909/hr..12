@@ -141,14 +141,14 @@ export class BranchModel {
     return this.findById(id);
   }
 
-  // Delete branch (soft delete)
+  // Delete branch (hard delete - permanently remove from database)
   static async delete(id: string): Promise<boolean> {
     // First, move all employees to no branch (null)
     const updateEmployeesQuery = 'UPDATE employees SET branch_id = NULL WHERE branch_id = ?';
     await executeQuery(updateEmployeesQuery, [id]);
 
-    // Then soft delete the branch
-    const query = 'UPDATE branches SET status = "inactive", updated_at = CURRENT_TIMESTAMP WHERE id = ?';
+    // Then delete the branch permanently from database
+    const query = 'DELETE FROM branches WHERE id = ?';
     const result = await executeQuery(query, [id]);
 
     return result.affectedRows > 0;

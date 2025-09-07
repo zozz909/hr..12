@@ -28,7 +28,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Progress } from '@/components/ui/progress';
 import { useInstitutions, useEmployees, useUnsponsoredEmployees, useExpiringEmployees } from '@/hooks/useHRData';
-import { institutionApi } from '@/lib/api-client';
+import { institutionApi, subscriptionApi } from '@/lib/api-client';
 import Link from 'next/link';
 import {
   Building,
@@ -40,7 +40,11 @@ import {
   AlertCircle,
   UserX,
   PlusCircle,
-  ShieldCheck,
+  Heart,
+  Shield,
+  Calendar,
+  CreditCard,
+  Upload,
 } from 'lucide-react';
 import {
   Dialog,
@@ -54,9 +58,227 @@ import {
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { useToast } from '@/hooks/use-toast';
-import { useApiMutation } from '@/hooks/useApi';
-import { Separator } from '@/components/ui/separator';
 import * as React from 'react';
+import { documentApi } from '@/lib/api-client';
+
+// Institution Expiry Stats Component
+function InstitutionExpiryStats() {
+  const [stats, setStats] = React.useState<any[]>([]);
+  const [summary, setSummary] = React.useState({
+    totalInstitutions: 0,
+    totalExpiredDocs: 0,
+    totalExpiringSoonDocs: 0,
+    totalExpiredSubs: 0,
+    totalExpiringSoonSubs: 0
+  });
+  const [loading, setLoading] = React.useState(true);
+
+  React.useEffect(() => {
+    const fetchExpiryStats = async () => {
+      try {
+        setLoading(true);
+
+        // جلب جميع المؤسسات
+        const institutionsResponse = await institutionApi.getAll();
+        if (!institutionsResponse.success) return;
+
+        const institutions = institutionsResponse.data || [];
+        const institutionStats = [];
+        let totalExpiredDocs = 0, totalExpiringSoonDocs = 0, totalExpiredSubs = 0, totalExpiringSoonSubs = 0;
+
+        for (const institution of institutions) {
+          // جلب المستندات المنتهية والتي أوشكت على الانتهاء
+          const [expiredDocs, expiringSoonDocs] = await Promise.all([
+            documentApi.getAll({ entityType: 'institution', entityId: institution.id, expired: true }),
+            documentApi.getAll({ entityType: 'institution', entityId: institution.id, expiring: true, days: 30 })
+          ]);
+
+          // جلب الاشتراكات المنتهية والتي أوشكت على الانتهاء
+          const subscriptionsResponse = await subscriptionApi.getByInstitutionId(institution.id);
+          const subscriptions = subscriptionsResponse.success ? subscriptionsResponse.data || [] : [];
+
+          const expiredSubs = subscriptions.filter((sub: any) => sub.status === 'expired');
+          const expiringSoonSubs = subscriptions.filter((sub: any) => sub.status === 'expiring_soon');
+
+          const expiredDocsCount = expiredDocs.data?.length || 0;
+          const expiringSoonDocsCount = expiringSoonDocs.data?.length || 0;
+          const expiredSubsCount = expiredSubs.length;
+          const expiringSoonSubsCount = expiringSoonSubs.length;
+
+          const totalIssues = expiredDocsCount + expiringSoonDocsCount + expiredSubsCount + expiringSoonSubsCount;
+
+          // إضافة للإحصائيات الإجمالية
+          totalExpiredDocs += expiredDocsCount;
+          totalExpiringSoonDocs += expiringSoonDocsCount;
+          totalExpiredSubs += expiredSubsCount;
+          totalExpiringSoonSubs += expiringSoonSubsCount;
+
+          if (totalIssues > 0) {
+            institutionStats.push({
+              id: institution.id,
+              name: institution.name,
+              expiredDocuments: expiredDocsCount,
+              expiringSoonDocuments: expiringSoonDocsCount,
+              expiredSubscriptions: expiredSubsCount,
+              expiringSoonSubscriptions: expiringSoonSubsCount,
+              totalIssues
+            });
+          }
+        }
+
+        // ترتيب حسب عدد المشاكل (الأكثر أولاً)
+        institutionStats.sort((a, b) => b.totalIssues - a.totalIssues);
+        setStats(institutionStats);
+
+        // حفظ الملخص الإجمالي
+        setSummary({
+          totalInstitutions: institutionStats.length,
+          totalExpiredDocs,
+          totalExpiringSoonDocs,
+          totalExpiredSubs,
+          totalExpiringSoonSubs
+        });
+      } catch (error) {
+        console.error('Error fetching expiry stats:', error);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchExpiryStats();
+  }, []);
+
+  if (loading) {
+    return (
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <AlertCircle className="h-5 w-5 text-orange-500" />
+            إحصائيات المستندات والاشتراكات
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="text-center py-8 text-muted-foreground">
+            جاري تحميل الإحصائيات...
+          </div>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  if (stats.length === 0) {
+    return (
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Shield className="h-5 w-5 text-green-500" />
+            إحصائيات المستندات والاشتراكات
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="text-center py-8 text-green-600">
+            🎉 ممتاز! جميع المستندات والاشتراكات سارية المفعول
+          </div>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2">
+          <AlertCircle className="h-5 w-5 text-orange-500" />
+          إحصائيات المستندات والاشتراكات المنتهية
+        </CardTitle>
+        <CardDescription>
+          المؤسسات التي تحتاج إلى تجديد مستندات أو اشتراكات
+        </CardDescription>
+      </CardHeader>
+      <CardContent>
+        {/* Summary Cards */}
+        <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-6">
+          <div className="text-center p-3 bg-red-50 rounded-lg border border-red-200">
+            <div className="text-2xl font-bold text-red-600">{summary.totalExpiredDocs}</div>
+            <div className="text-sm text-red-600">مستندات منتهية</div>
+          </div>
+          <div className="text-center p-3 bg-orange-50 rounded-lg border border-orange-200">
+            <div className="text-2xl font-bold text-orange-600">{summary.totalExpiringSoonDocs}</div>
+            <div className="text-sm text-orange-600">مستندات تنتهي قريباً</div>
+          </div>
+          <div className="text-center p-3 bg-red-50 rounded-lg border border-red-200">
+            <div className="text-2xl font-bold text-red-600">{summary.totalExpiredSubs}</div>
+            <div className="text-sm text-red-600">اشتراكات منتهية</div>
+          </div>
+          <div className="text-center p-3 bg-orange-50 rounded-lg border border-orange-200">
+            <div className="text-2xl font-bold text-orange-600">{summary.totalExpiringSoonSubs}</div>
+            <div className="text-sm text-orange-600">اشتراكات تنتهي قريباً</div>
+          </div>
+          <div className="text-center p-3 bg-gray-50 rounded-lg border border-gray-200">
+            <div className="text-2xl font-bold text-gray-600">{summary.totalInstitutions}</div>
+            <div className="text-sm text-gray-600">مؤسسات متأثرة</div>
+          </div>
+        </div>
+        <div className="space-y-4">
+          {stats.map((institution, index) => (
+            <div key={institution.id} className="p-4 border rounded-lg bg-gradient-to-r from-red-50 to-orange-50 hover:shadow-md transition-shadow">
+              <div className="flex items-center justify-between mb-3">
+                <div className="flex items-center gap-3">
+                  <div className="flex items-center justify-center w-8 h-8 bg-red-100 text-red-600 rounded-full text-sm font-bold">
+                    {index + 1}
+                  </div>
+                  <h3 className="font-semibold text-lg">{institution.name}</h3>
+                </div>
+                <Badge variant="destructive" className="text-sm">
+                  {institution.totalIssues} مشكلة
+                </Badge>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
+                {institution.expiredDocuments > 0 && (
+                  <div className="flex items-center gap-2 p-2 bg-red-100 rounded-md text-red-700">
+                    <FileText className="h-4 w-4" />
+                    <span className="font-medium">{institution.expiredDocuments} مستند منتهي</span>
+                  </div>
+                )}
+
+                {institution.expiringSoonDocuments > 0 && (
+                  <div className="flex items-center gap-2 p-2 bg-orange-100 rounded-md text-orange-700">
+                    <FileWarning className="h-4 w-4" />
+                    <span className="font-medium">{institution.expiringSoonDocuments} مستند ينتهي قريباً</span>
+                  </div>
+                )}
+
+                {institution.expiredSubscriptions > 0 && (
+                  <div className="flex items-center gap-2 p-2 bg-red-100 rounded-md text-red-700">
+                    <CreditCard className="h-4 w-4" />
+                    <span className="font-medium">{institution.expiredSubscriptions} اشتراك منتهي</span>
+                  </div>
+                )}
+
+                {institution.expiringSoonSubscriptions > 0 && (
+                  <div className="flex items-center gap-2 p-2 bg-orange-100 rounded-md text-orange-700">
+                    <Calendar className="h-4 w-4" />
+                    <span className="font-medium">{institution.expiringSoonSubscriptions} اشتراك ينتهي قريباً</span>
+                  </div>
+                )}
+              </div>
+
+              <div className="mt-3 flex justify-end">
+                <Button variant="outline" size="sm" asChild>
+                  <Link href={`/institutions/${institution.id}`}>
+                    <ArrowLeft className="h-4 w-4 mr-2" />
+                    عرض التفاصيل
+                  </Link>
+                </Button>
+              </div>
+            </div>
+          ))}
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
 
 // Dashboard component with real API data
 export default function Dashboard() {
@@ -73,25 +295,76 @@ export default function Dashboard() {
         totalInstitutions: 0,
         totalEmployees: 0,
         unsponsoredEmployees: 0,
+        expiredIqamas: 0,
+        expiredWorkPermits: 0,
+        expiredContracts: 0,
+        expiredHealthCerts: 0,
+        expiredInsurance: 0,
         expiringIqamas: 0,
         expiringWorkPermits: 0,
         expiringContracts: 0,
+        expiringHealthCerts: 0,
+        expiringInsurance: 0,
         employeeDistribution: []
       };
     }
 
-    // Count expiring documents by type
-    const expiringIqamas = expiringEmployees?.filter(emp =>
-      emp.iqamaExpiry && new Date(emp.iqamaExpiry) <= new Date(Date.now() + 30 * 24 * 60 * 60 * 1000)
+    // Count expired documents by type (already expired, not expiring soon)
+    const today = new Date();
+    today.setHours(0, 0, 0, 0); // بداية اليوم الحالي
+
+    const expiredIqamas = employees?.filter(emp =>
+      emp.iqamaExpiry && new Date(emp.iqamaExpiry) < today
     ).length || 0;
 
-    const expiringWorkPermits = expiringEmployees?.filter(emp =>
-      emp.workPermitExpiry && new Date(emp.workPermitExpiry) <= new Date(Date.now() + 30 * 24 * 60 * 60 * 1000)
+    const expiredWorkPermits = employees?.filter(emp =>
+      emp.workPermitExpiry && new Date(emp.workPermitExpiry) < today
     ).length || 0;
 
-    const expiringContracts = expiringEmployees?.filter(emp =>
-      emp.contractExpiry && new Date(emp.contractExpiry) <= new Date(Date.now() + 30 * 24 * 60 * 60 * 1000)
+    const expiredContracts = employees?.filter(emp =>
+      emp.contractExpiry && new Date(emp.contractExpiry) < today
     ).length || 0;
+
+    const expiredHealthCerts = employees?.filter(emp =>
+      emp.healthCertExpiry && new Date(emp.healthCertExpiry) < today
+    ).length || 0;
+
+    const expiredInsurance = employees?.filter(emp =>
+      emp.healthInsuranceExpiry && new Date(emp.healthInsuranceExpiry) < today
+    ).length || 0;
+
+    // Count documents expiring soon (within 30 days but NOT expired) for alerts section
+    const futureDate = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
+
+    const expiringIqamas = employees?.filter(emp => {
+      if (!emp.iqamaExpiry) return false;
+      const expiryDate = new Date(emp.iqamaExpiry);
+      return expiryDate > today && expiryDate <= futureDate;
+    }).length || 0;
+
+    const expiringWorkPermits = employees?.filter(emp => {
+      if (!emp.workPermitExpiry) return false;
+      const expiryDate = new Date(emp.workPermitExpiry);
+      return expiryDate > today && expiryDate <= futureDate;
+    }).length || 0;
+
+    const expiringContracts = employees?.filter(emp => {
+      if (!emp.contractExpiry) return false;
+      const expiryDate = new Date(emp.contractExpiry);
+      return expiryDate > today && expiryDate <= futureDate;
+    }).length || 0;
+
+    const expiringHealthCerts = employees?.filter(emp => {
+      if (!emp.healthCertExpiry) return false;
+      const expiryDate = new Date(emp.healthCertExpiry);
+      return expiryDate > today && expiryDate <= futureDate;
+    }).length || 0;
+
+    const expiringInsurance = employees?.filter(emp => {
+      if (!emp.healthInsuranceExpiry) return false;
+      const expiryDate = new Date(emp.healthInsuranceExpiry);
+      return expiryDate > today && expiryDate <= futureDate;
+    }).length || 0;
 
     // Create employee distribution chart data
     const employeeDistribution = institutions?.map(institution => ({
@@ -103,9 +376,16 @@ export default function Dashboard() {
       totalInstitutions: institutions?.length || 0,
       totalEmployees: employees?.length || 0,
       unsponsoredEmployees: unsponsoredEmployees?.length || 0,
+      expiredIqamas,
+      expiredWorkPermits,
+      expiredContracts,
+      expiredHealthCerts,
+      expiredInsurance,
       expiringIqamas,
       expiringWorkPermits,
       expiringContracts,
+      expiringHealthCerts,
+      expiringInsurance,
       employeeDistribution
     };
   }, [institutions, employees, unsponsoredEmployees, expiringEmployees, institutionsLoading, employeesLoading]);
@@ -121,21 +401,6 @@ export default function Dashboard() {
       label: 'موظفون غير مكفولين',
       value: analytics.unsponsoredEmployees,
       icon: UserX,
-    },
-    {
-      label: 'إقامات ستنتهي قريباً',
-      value: analytics.expiringIqamas,
-      icon: FileWarning,
-    },
-    {
-      label: 'رخص عمل ستنتهي قريباً',
-      value: analytics.expiringWorkPermits,
-      icon: Briefcase,
-    },
-    {
-      label: 'عقود ستنتهي قريباً',
-      value: analytics.expiringContracts,
-      icon: FileText,
     },
   ];
 
@@ -161,6 +426,7 @@ function AddInstitutionForm({ setOpen, onSuccess }: { setOpen: (open: boolean) =
       name: formData.get('name') as string,
       crNumber: formData.get('crNumber') as string,
       crExpiryDate: formData.get('crExpiry') as string,
+      status: 'active' as const,
     };
 
     try {
@@ -268,6 +534,85 @@ function AddInstitutionForm({ setOpen, onSuccess }: { setOpen: (open: boolean) =
         ))}
       </section>
 
+      {/* إحصائيات الوثائق المنتهية */}
+      <Card className="mb-8">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Calendar className="h-5 w-5 text-red-500" />
+            إحصائيات الوثائق المنتهية الصلاحية في جميع المؤسسات
+          </CardTitle>
+          <CardDescription>
+            نظرة شاملة على جميع الوثائق المنتهية الصلاحية التي تحتاج إلى تجديد فوري
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-5 gap-4">
+            <div className="flex items-center p-4 bg-red-50 rounded-lg border border-red-200">
+              <CreditCard className="h-8 w-8 text-red-500 ml-3" />
+              <div className="flex-1">
+                <p className="text-sm font-medium text-red-700">الإقامات</p>
+                <p className="text-2xl font-bold text-red-600">{analytics.expiredIqamas}</p>
+                <p className="text-xs text-red-500">منتهية الصلاحية</p>
+              </div>
+            </div>
+
+            <div className="flex items-center p-4 bg-yellow-50 rounded-lg border border-yellow-200">
+              <Briefcase className="h-8 w-8 text-yellow-500 ml-3" />
+              <div className="flex-1">
+                <p className="text-sm font-medium text-yellow-700">رخص العمل</p>
+                <p className="text-2xl font-bold text-yellow-600">{analytics.expiredWorkPermits}</p>
+                <p className="text-xs text-yellow-500">منتهية الصلاحية</p>
+              </div>
+            </div>
+
+            <div className="flex items-center p-4 bg-orange-50 rounded-lg border border-orange-200">
+              <FileText className="h-8 w-8 text-orange-500 ml-3" />
+              <div className="flex-1">
+                <p className="text-sm font-medium text-orange-700">العقود</p>
+                <p className="text-2xl font-bold text-orange-600">{analytics.expiredContracts}</p>
+                <p className="text-xs text-orange-500">منتهية الصلاحية</p>
+              </div>
+            </div>
+
+            <div className="flex items-center p-4 bg-blue-50 rounded-lg border border-blue-200">
+              <Shield className="h-8 w-8 text-blue-500 ml-3" />
+              <div className="flex-1">
+                <p className="text-sm font-medium text-blue-700">التأمين الصحي</p>
+                <p className="text-2xl font-bold text-blue-600">{analytics.expiredInsurance}</p>
+                <p className="text-xs text-blue-500">منتهي الصلاحية</p>
+              </div>
+            </div>
+
+            <div className="flex items-center p-4 bg-pink-50 rounded-lg border border-pink-200">
+              <Heart className="h-8 w-8 text-pink-500 ml-3" />
+              <div className="flex-1">
+                <p className="text-sm font-medium text-pink-700">الشهادة الصحية</p>
+                <p className="text-2xl font-bold text-pink-600">{analytics.expiredHealthCerts}</p>
+                <p className="text-xs text-pink-500">منتهية الصلاحية</p>
+              </div>
+            </div>
+          </div>
+
+          <div className="mt-6 p-4 bg-red-50 rounded-lg border border-red-200">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm font-medium text-red-700">إجمالي الوثائق المنتهية الصلاحية</p>
+                <p className="text-2xl font-bold text-red-900">
+                  {(analytics.expiredIqamas || 0) + (analytics.expiredWorkPermits || 0) + (analytics.expiredContracts || 0) + (analytics.expiredInsurance || 0) + (analytics.expiredHealthCerts || 0)}
+                </p>
+                <p className="text-xs text-red-600 mt-1">تحتاج إلى تجديد فوري</p>
+              </div>
+              <Button variant="destructive" asChild>
+                <Link href="/employees?expired=true">
+                  <AlertCircle className="ml-2 h-4 w-4" />
+                  عرض الوثائق المنتهية
+                </Link>
+              </Button>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
       <div className="grid grid-cols-1 gap-8 lg:grid-cols-3">
         <Card className="lg:col-span-2">
           <CardHeader>
@@ -318,9 +663,12 @@ function AddInstitutionForm({ setOpen, onSuccess }: { setOpen: (open: boolean) =
         <div className="space-y-8">
             <Card>
               <CardHeader>
-                <CardTitle>تنبيهات هامة</CardTitle>
+                <CardTitle className="flex items-center gap-2">
+                  <AlertCircle className="h-5 w-5 text-orange-500" />
+                  تنبيهات هامة
+                </CardTitle>
                 <CardDescription>
-                  المستندات التي تحتاج إلى اهتمام فوري.
+                  المستندات التي ستنتهي خلال 30 يوم وتحتاج إلى تجديد فوري
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
@@ -334,7 +682,7 @@ function AddInstitutionForm({ setOpen, onSuccess }: { setOpen: (open: boolean) =
                  <div className="flex items-center">
                     <FileWarning className="h-5 w-5 text-yellow-500 ml-3"/>
                      <div className="flex-1">
-                        <p className="font-medium">رخص على وشك الانتهاء</p>
+                        <p className="font-medium">رخص عمل ستنتهي قريباً</p>
                         <p className="font-bold text-lg">{analytics.expiringWorkPermits}</p>
                     </div>
                  </div>
@@ -343,6 +691,20 @@ function AddInstitutionForm({ setOpen, onSuccess }: { setOpen: (open: boolean) =
                      <div className="flex-1">
                         <p className="font-medium">عقود ستنتهي قريباً</p>
                         <p className="font-bold text-lg">{analytics.expiringContracts}</p>
+                    </div>
+                 </div>
+                 <div className="flex items-center">
+                    <Heart className="h-5 w-5 text-red-500 ml-3"/>
+                     <div className="flex-1">
+                        <p className="font-medium">شهادات صحية ستنتهي قريباً</p>
+                        <p className="font-bold text-lg">{analytics.expiringHealthCerts}</p>
+                    </div>
+                 </div>
+                 <div className="flex items-center">
+                    <Shield className="h-5 w-5 text-blue-500 ml-3"/>
+                     <div className="flex-1">
+                        <p className="font-medium">تأمين صحي سينتهي قريباً</p>
+                        <p className="font-bold text-lg">{analytics.expiringInsurance}</p>
                     </div>
                  </div>
               </CardContent>
@@ -460,6 +822,38 @@ function AddInstitutionForm({ setOpen, onSuccess }: { setOpen: (open: boolean) =
           </Table>
         </CardContent>
       </Card>
+
+      {/* Excel Upload Section */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Upload className="h-5 w-5 text-blue-500" />
+            رفع بيانات الموظفين
+          </CardTitle>
+          <CardDescription>
+            رفع معلومات الموظفين بشكل مجمع من ملف Excel
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="flex flex-col sm:flex-row gap-4 items-start">
+            <Button asChild className="flex items-center gap-2">
+              <Link href="/employees/bulk-upload">
+                <Upload className="h-4 w-4" />
+                رفع ملف Excel
+              </Link>
+            </Button>
+            <div className="text-sm text-muted-foreground">
+              <p>• يدعم ملفات .xlsx و .xls</p>
+              <p>• يمكن رفع معلومات متعددة للموظفين دفعة واحدة</p>
+              <p>• تحديث البيانات الموجودة أو إضافة موظفين جدد</p>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Institution Documents & Subscriptions Status */}
+      <InstitutionExpiryStats />
+
     </div>
   );
 }

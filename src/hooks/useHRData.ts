@@ -1,6 +1,8 @@
 import { useState, useEffect, useCallback } from 'react';
-import { institutionApi, employeeApi } from '@/lib/api-client';
+import { institutionApi, employeeApi, leaveApi } from '@/lib/api-client';
 import { Institution, Employee } from '@/types';
+import { useDebounce } from './useDebounce';
+import { LeaveRequest } from '@/lib/models/LeaveRequest';
 
 // Simple hook for institutions
 export function useInstitutions() {
@@ -33,6 +35,7 @@ export function useInstitutions() {
   }, [fetchInstitutions]);
 
   return {
+    data: institutions,
     institutions,
     loading,
     error,
@@ -40,17 +43,27 @@ export function useInstitutions() {
   };
 }
 
-// Simple hook for employees
+// Simple hook for employees with debounced search
 export function useEmployees(filters?: { search?: string; institutionId?: string }) {
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  // استخدام debounce للبحث لتجنب استدعاء API مع كل حرف
+  const debouncedSearch = useDebounce(filters?.search || '', 500);
+
   const fetchEmployees = useCallback(async () => {
     try {
       setLoading(true);
       setError(null);
-      const response = await employeeApi.getAll(filters);
+
+      // استخدام القيمة المؤخرة للبحث
+      const searchFilters = {
+        ...filters,
+        search: debouncedSearch || undefined
+      };
+
+      const response = await employeeApi.getAll(searchFilters);
 
       if (response.success && response.data) {
         setEmployees(response.data);
@@ -64,7 +77,7 @@ export function useEmployees(filters?: { search?: string; institutionId?: string
     } finally {
       setLoading(false);
     }
-  }, [filters?.search, filters?.institutionId]);
+  }, [debouncedSearch, filters?.institutionId]);
 
   useEffect(() => {
     fetchEmployees();
@@ -151,5 +164,51 @@ export function useExpiringEmployees(days: number = 30) {
     loading,
     error,
     refetch: fetchEmployees
+  };
+}
+
+// Hook for leave requests
+export function useLeaveRequests(filters?: {
+  employeeId?: string;
+  institutionId?: string;
+  branchId?: string;
+  status?: 'pending' | 'approved' | 'rejected';
+  leaveType?: 'annual' | 'sick' | 'unpaid' | 'emergency';
+  startDate?: string;
+  endDate?: string;
+}) {
+  const [leaveRequests, setLeaveRequests] = useState<LeaveRequest[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const fetchLeaveRequests = useCallback(async () => {
+    try {
+      setLoading(true);
+      setError(null);
+      const response = await leaveApi.getAll(filters);
+
+      if (response.success && response.data) {
+        setLeaveRequests(response.data);
+      } else {
+        setError(response.error || 'Failed to fetch leave requests');
+        setLeaveRequests([]);
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Unknown error');
+      setLeaveRequests([]);
+    } finally {
+      setLoading(false);
+    }
+  }, [filters?.employeeId, filters?.institutionId, filters?.branchId, filters?.status, filters?.leaveType, filters?.startDate, filters?.endDate]);
+
+  useEffect(() => {
+    fetchLeaveRequests();
+  }, [fetchLeaveRequests]);
+
+  return {
+    leaveRequests,
+    loading,
+    error,
+    refetch: fetchLeaveRequests
   };
 }

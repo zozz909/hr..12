@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { InstitutionModel } from '@/lib/models/Institution';
 import { z } from 'zod';
+import { requirePermission, unauthorizedResponse, unauthenticatedResponse } from '@/lib/auth-utils';
 
 // Validation schema for institution creation/update
 const institutionSchema = z.object({
@@ -19,6 +20,17 @@ const institutionSchema = z.object({
 // GET /api/institutions - Get all institutions
 export async function GET(request: NextRequest) {
   try {
+    // التحقق من المصادقة والصلاحية - معطل مؤقتاً للتطوير
+    // const { user, hasPermission } = await requirePermission(request, 'institutions_view');
+
+    // if (!user) {
+    //   return unauthenticatedResponse();
+    // }
+
+    // if (!hasPermission) {
+    //   return unauthorizedResponse('ليس لديك صلاحية لعرض المؤسسات');
+    // }
+
     const { searchParams } = new URL(request.url);
     const includeExpiring = searchParams.get('expiring');
     const days = searchParams.get('days');
@@ -53,6 +65,17 @@ export async function GET(request: NextRequest) {
 // POST /api/institutions - Create new institution
 export async function POST(request: NextRequest) {
   try {
+    // التحقق من المصادقة والصلاحية - معطل مؤقتاً للتطوير
+    // const { user, hasPermission } = await requirePermission(request, 'institutions_add');
+
+    // if (!user) {
+    //   return unauthenticatedResponse();
+    // }
+
+    // if (!hasPermission) {
+    //   return unauthorizedResponse('ليس لديك صلاحية لإضافة المؤسسات');
+    // }
+
     const body = await request.json();
 
     // Validate request body
@@ -68,7 +91,10 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const institutionData = validationResult.data;
+    const institutionData = {
+      ...validationResult.data,
+      status: validationResult.data.status || 'active'
+    };
 
     // Create institution
     const newInstitution = await InstitutionModel.create(institutionData);

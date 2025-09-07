@@ -18,6 +18,7 @@ import {
   FileText,
   FilePieChart,
   Building2,
+  Upload,
 } from "lucide-react"
 import { usePathname } from 'next/navigation'
 import * as React from 'react';
@@ -39,6 +40,7 @@ import { Separator } from "./separator";
 const menuItems = [
   { href: '/', label: 'لوحة التحكم', icon: LayoutDashboard },
   { href: '/employees', label: 'جميع الموظفين', icon: Users },
+  { href: '/employees/bulk-upload', label: 'رفع ملف Excel', icon: Upload },
   { href: '/employees/archived', label: 'الأرشيف', icon: Archive },
   { href: '/branches', label: 'الفروع', icon: Building2 },
   { href: '/leaves', label: 'الإجازات', icon: CalendarOff },
@@ -46,7 +48,7 @@ const menuItems = [
   { href: '/payroll', label: 'الرواتب', icon: HandCoins },
   { href: '/advances', label: 'السلف', icon: Wallet },
   { href: '/forms', label: 'نماذج إدارية', icon: FileText },
-  { href: '/reports', label: 'التقارير', icon: FilePieChart },
+  { href: '/reports/simple', label: 'التقارير', icon: FilePieChart },
 ];
 
 export function Navbar() {
@@ -102,11 +104,6 @@ export function Navbar() {
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-56">
-            <DropdownMenuItem>
-              <Settings className="ml-2 h-4 w-4" />
-              <span>الإعدادات</span>
-            </DropdownMenuItem>
-            <DropdownMenuSeparator />
             <DropdownMenuItem>
               <LogOut className="ml-2 h-4 w-4" />
               <span>تسجيل الخروج</span>

@@ -31,6 +31,12 @@ const nextConfig: NextConfig = {
         port: '',
         pathname: '/**',
       },
+      {
+        protocol: 'http',
+        hostname: 'localhost',
+        port: '9004',
+        pathname: '/uploads/**',
+      },
     ],
   },
   webpack: (config, { isServer }) => {
@@ -60,7 +66,6 @@ const nextConfig: NextConfig = {
         dns: false,
         domain: false,
         http2: false,
-        https: false,
         inspector: false,
         module: false,
         perf_hooks: false,

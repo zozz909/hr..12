@@ -55,7 +55,10 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const branchData = validationResult.data;
+    const branchData = {
+      ...validationResult.data,
+      status: validationResult.data.status || 'active'
+    };
 
     // Create branch
     const newBranch = await BranchModel.create(branchData);

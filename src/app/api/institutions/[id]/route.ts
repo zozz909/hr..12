@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { InstitutionModel } from '@/lib/models/Institution';
 import { z } from 'zod';
+import { requirePermission, unauthorizedResponse, unauthenticatedResponse } from '@/lib/auth-utils';
 
 // Validation schema for institution updates
 const updateInstitutionSchema = z.object({
@@ -76,6 +77,17 @@ export async function PUT(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    // التحقق من المصادقة والصلاحية
+    const { user, hasPermission } = await requirePermission(request, 'institutions_edit');
+
+    if (!user) {
+      return unauthenticatedResponse();
+    }
+
+    if (!hasPermission) {
+      return unauthorizedResponse('ليس لديك صلاحية لتعديل المؤسسات');
+    }
+
     const { id } = await params;
 
     if (!id) {
@@ -150,6 +162,17 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    // التحقق من المصادقة والصلاحية
+    const { user, hasPermission } = await requirePermission(request, 'institutions_delete');
+
+    if (!user) {
+      return unauthenticatedResponse();
+    }
+
+    if (!hasPermission) {
+      return unauthorizedResponse('ليس لديك صلاحية لحذف المؤسسات');
+    }
+
     const { id } = await params;
 
     if (!id) {

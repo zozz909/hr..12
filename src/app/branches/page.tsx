@@ -269,7 +269,10 @@ function AddBranchDialog({ institutions, onSuccess }: { institutions: Institutio
 
     try {
       setLoading(true);
-      const result = await branchApi.create(formData);
+      const result = await branchApi.create({
+        ...formData,
+        status: 'active' as const
+      });
 
       if (result.success) {
         toast({
@@ -430,7 +433,10 @@ function EditBranchDialog({ branch, institutions, employees, onSuccess }: {
         ...formData,
         managerId: formData.managerId === 'no-manager' ? null : formData.managerId || null
       };
-      const result = await branchApi.update(branch.id, updateData);
+      const result = await branchApi.update(branch.id, {
+        ...updateData,
+        managerId: updateData.managerId || undefined
+      });
 
       if (result.success) {
         toast({
